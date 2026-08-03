@@ -26,6 +26,15 @@ const (
 	screenSearch
 )
 
+// selectorShortcuts maps built-in comparison IDs to a single key that both
+// jumps to and opens that comparison. User-defined comparisons get none.
+var selectorShortcuts = map[string]string{
+	"worktree": "w",
+	"staged":   "s",
+	"branch":   "m",
+	"commit":   "c",
+}
+
 type discoveredMsg struct {
 	cmp     gitx.Comparison
 	files   []gitx.ChangedFile
@@ -226,6 +235,16 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spin.Tick, m.discover(cmp, false))
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
+	default:
+		for i, c := range m.comparisons {
+			if k, ok := selectorShortcuts[c.ID]; !ok || k != msg.String() {
+				continue
+			}
+			m.selCursor = i
+			m.screen = screenLoading
+			m.status = ""
+			return m, tea.Batch(m.spin.Tick, m.discover(c, false))
+		}
 	}
 	return m, nil
 }
@@ -415,9 +434,13 @@ func (m Model) viewSelector() string {
 	b.WriteString(titleStyle.Render("godiff — select comparison"))
 	b.WriteString("\n\n")
 	for i, c := range m.comparisons {
-		line := "  " + c.Label
+		label := c.Label
+		if k, ok := selectorShortcuts[c.ID]; ok {
+			label += " (" + k + ")"
+		}
+		line := "  " + label
 		if i == m.selCursor {
-			line = selectedStyle.Render("> " + c.Label)
+			line = selectedStyle.Render("> " + label)
 		}
 		b.WriteString(line + "\n")
 	}

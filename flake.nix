@@ -1,10 +1,18 @@
 {
   description = "godiff — interactive terminal navigator for git diffs";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Claude Code CLI (rolling: bleeding edge, updated separately).
+    claude-code-nix.url = "github:sadjow/claude-code-nix";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      claude-code-nix,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -53,6 +61,7 @@
             golangci-lint
             git
             delta
+            claude-code-nix.packages.${pkgs.stdenv.hostPlatform.system}.claude-code
             nixfmt-rfc-style
           ];
         };
