@@ -33,7 +33,9 @@ configured base (`master` by default), and the current commit.
 | --- | --- |
 | `↑/k` `↓/j` | move selection |
 | `→/l` / `←/h` | expand / collapse directory |
-| `enter` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
+| `enter` | open: directory toggles its subclusters, file opens its diff, root opens the full diff |
+| `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
+| `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc` cancels |
 | `r` | refresh changed paths (keeps selection and expansion) |
 | `esc`/`b` | back to the comparison selector |
 | `?` | toggle full key help |

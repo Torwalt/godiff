@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Torwalt/godiff/internal/gitx"
@@ -22,6 +23,7 @@ const (
 	screenSelector screen = iota
 	screenLoading
 	screenTree
+	screenSearch
 )
 
 type discoveredMsg struct {
@@ -50,6 +52,11 @@ type Model struct {
 	rows   []tree.Row
 	cursor int
 	offset int
+
+	// directory search state
+	searchInput   textinput.Model
+	searchMatches []*tree.Node
+	searchCursor  int
 
 	width, height int
 	spin          spinner.Model
@@ -130,11 +137,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSelector(msg)
 		case screenTree:
 			return m.updateTree(msg)
+		case screenSearch:
+			return m.updateSearch(msg)
 		case screenLoading:
 			if msg.String() == "q" || msg.String() == "ctrl+c" {
 				return m, tea.Quit
 			}
 		}
+	}
+
+	if m.screen == screenSearch {
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -242,11 +257,16 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.Open):
 		n := m.rows[m.cursor].Node
-		cmd := m.repo.DisplayCmd(*m.active, n.Path)
-		m.status = ""
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-			return diffDoneMsg{err: err}
-		})
+		if n.Kind == tree.KindDir {
+			n.Expanded = !n.Expanded
+			m.rows = m.root.VisibleRows()
+			break
+		}
+		return m.openDiff(n)
+	case key.Matches(msg, keys.Diff):
+		return m.openDiff(m.rows[m.cursor].Node)
+	case key.Matches(msg, keys.Search):
+		return m.startSearch()
 	case key.Matches(msg, keys.Refresh):
 		m.screen = screenLoading
 		return m, tea.Batch(m.spin.Tick, m.discover(*m.active, true))
@@ -260,6 +280,61 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.clampScroll()
 	return m, nil
+}
+
+func (m Model) openDiff(n *tree.Node) (tea.Model, tea.Cmd) {
+	cmd := m.repo.DisplayCmd(*m.active, n.Path)
+	m.status = ""
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return diffDoneMsg{err: err}
+	})
+}
+
+func (m Model) startSearch() (tea.Model, tea.Cmd) {
+	m.searchInput = textinput.New()
+	m.searchInput.Prompt = "/ "
+	m.searchInput.Focus()
+	m.searchMatches = rankDirs(m.root.Dirs(), "")
+	m.searchCursor = 0
+	m.screen = screenSearch
+	m.status = ""
+	return m, textinput.Blink
+}
+
+func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.screen = screenTree
+		return m, nil
+	case "up", "ctrl+p", "ctrl+k":
+		if m.searchCursor > 0 {
+			m.searchCursor--
+		}
+		return m, nil
+	case "down", "ctrl+n", "ctrl+j":
+		if m.searchCursor < len(m.searchMatches)-1 {
+			m.searchCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.searchCursor < len(m.searchMatches) {
+			n := m.searchMatches[m.searchCursor]
+			tree.ExpandTo(n)
+			n.Expanded = true
+			m.rows = m.root.VisibleRows()
+			m.cursor = m.rowIndex(n)
+			m.clampScroll()
+		}
+		m.screen = screenTree
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.searchInput, cmd = m.searchInput.Update(msg)
+	m.searchMatches = rankDirs(m.root.Dirs(), m.searchInput.Value())
+	if m.searchCursor >= len(m.searchMatches) {
+		m.searchCursor = max(len(m.searchMatches)-1, 0)
+	}
+	return m, cmd
 }
 
 // clampScroll keeps the cursor inside the visible window.
@@ -298,8 +373,41 @@ func (m Model) View() string {
 		return fmt.Sprintf("\n %s loading %s…\n", m.spin.View(), label)
 	case screenTree:
 		return m.viewTree()
+	case screenSearch:
+		return m.viewSearch()
 	}
 	return ""
+}
+
+func (m Model) viewSearch() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("godiff — search directories"))
+	b.WriteString("\n")
+	b.WriteString(m.searchInput.View())
+	b.WriteString("\n\n")
+
+	if len(m.searchMatches) == 0 {
+		b.WriteString("  no matching directories\n")
+	}
+	visible := m.height - 5
+	if visible < 1 {
+		visible = 1
+	}
+	offset := 0
+	if m.searchCursor >= visible {
+		offset = m.searchCursor - visible + 1
+	}
+	end := min(offset+visible, len(m.searchMatches))
+	for i := offset; i < end; i++ {
+		line := "  " + m.searchMatches[i].Path + "/"
+		if i == m.searchCursor {
+			line = selectedStyle.Render("> " + m.searchMatches[i].Path + "/")
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(statusStyle.Render("enter jump · ↑/↓ move · esc cancel"))
+	return b.String()
 }
 
 func (m Model) viewSelector() string {

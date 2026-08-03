@@ -21,7 +21,7 @@
           pname = "godiff";
           version = "0.1.0";
           src = self;
-          vendorHash = "sha256-WlKtVO/wmbc6a8+BRJUS3vSKy8l/GX/jTUuy8V3jUyg=";
+          vendorHash = "sha256-KZ6bd165LhMk7KtvSP+C/kSEj+g4sm/dFHp0c/d7G/E=";
           # unit and integration tests run in checkPhase and shell out to git
           nativeCheckInputs = [ pkgs.git ];
           preCheck = "export HOME=$TMPDIR";

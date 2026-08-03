@@ -176,6 +176,22 @@ func (n *Node) RestoreExpanded(paths map[string]bool) {
 	walk(n)
 }
 
+// Dirs returns all directory nodes in depth-first order.
+func (n *Node) Dirs() []*Node {
+	var dirs []*Node
+	var walk func(node *Node)
+	walk = func(node *Node) {
+		if node.Kind == KindDir {
+			dirs = append(dirs, node)
+		}
+		for _, c := range node.Children {
+			walk(c)
+		}
+	}
+	walk(n)
+	return dirs
+}
+
 // ExpandTo expands all ancestors of node so it becomes visible.
 func ExpandTo(node *Node) {
 	for p := node.Parent; p != nil; p = p.Parent {
