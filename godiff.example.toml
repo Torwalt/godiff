@@ -1,0 +1,30 @@
+# Example godiff configuration.
+#
+# Global config:     ~/.config/godiff/config.toml
+# Repository config: <repo root>/.godiff.toml  (overrides global by id)
+
+# Base branch for the built-in "branch" comparison and the {base} placeholder.
+base_branch = "master"
+
+# Exclusion pathspecs applied to every comparison, for discovery and display.
+# Plain entries are wrapped as ":(exclude)<entry>"; entries starting with ":"
+# are passed to git verbatim. See gitglossary(7) on pathspec magic.
+exclude = [
+  "vendor",
+  ":(exclude,glob)**/*.pb.go",
+  ":(exclude,glob)**/*.lock",
+]
+
+# Add a new comparison, or override a built-in by reusing its id
+# (built-ins: worktree, staged, branch, commit).
+[[comparisons]]
+id = "last"
+label = "Last commit range"
+kind = "diff"              # "diff" (default) or "show"
+args = ["HEAD~1..HEAD"]
+exclude = ["mocks"]        # per-comparison, appended to the shared excludes
+
+[[comparisons]]
+id = "review"
+label = "Review against {base}"
+args = ["{base}...HEAD"]   # {base} expands to the effective base branch

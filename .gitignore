@@ -1,0 +1,9 @@
+# build output
+/godiff
+/result
+
+# per-developer AI agent entrypoints (AGENTS.md is the shared truth)
+/CLAUDE.md
+/.claude/
+/.cursor/
+.direnv/
