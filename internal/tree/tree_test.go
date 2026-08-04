@@ -23,7 +23,7 @@ func expandAll(n *Node) {
 	}
 }
 
-// outline renders visible rows as "depth:name" for compact assertions.
+// outline renders visible rows as indented labels for compact assertions.
 func outline(root *Node) string {
 	var parts []string
 	for _, r := range root.VisibleRows() {
@@ -31,11 +31,11 @@ func outline(root *Node) string {
 			parts = append(parts, "root")
 			continue
 		}
-		name := r.Node.Name
+		label := r.Label
 		if r.Node.Kind == KindDir {
-			name += "/"
+			label += "/"
 		}
-		parts = append(parts, strings.Repeat(" ", r.Depth)+name)
+		parts = append(parts, strings.Repeat(" ", r.Depth)+label)
 	}
 	return strings.Join(parts, "\n")
 }
@@ -58,13 +58,10 @@ root
    m.sql
   queries/
    q.sql
- internal/
-  app/
-   x.go
- proto/
-  contract/
-   v1/
-    c.proto
+ internal/app/
+  x.go
+ proto/contract/v1/
+  c.proto
  aa.txt
  zz.txt`)
 	if got := outline(root); got != want {
@@ -75,12 +72,12 @@ root
 func TestCollapsedByDefault(t *testing.T) {
 	root := Build(entries("db/queries/q.sql", "top.txt"))
 	rows := root.VisibleRows()
-	var names []string
+	var labels []string
 	for _, r := range rows[1:] {
-		names = append(names, r.Node.Name)
+		labels = append(labels, r.Label)
 	}
-	if strings.Join(names, ",") != "db,top.txt" {
-		t.Errorf("visible = %v, want only top level", names)
+	if strings.Join(labels, ",") != "db/queries,top.txt" {
+		t.Errorf("visible = %v, want only top level", labels)
 	}
 }
 
@@ -90,13 +87,105 @@ func TestExpandCollapse(t *testing.T) {
 	if db == nil || db.Kind != KindDir {
 		t.Fatalf("db node = %+v", db)
 	}
-	db.Expanded = true
-	if len(root.VisibleRows()) != 3 { // root, db, queries
+	SetExpanded(db, true)
+	if len(root.VisibleRows()) != 3 { // root, db/queries, q.sql
 		t.Errorf("rows = %d, want 3", len(root.VisibleRows()))
 	}
-	db.Expanded = false
+	SetExpanded(db, false)
 	if len(root.VisibleRows()) != 2 {
 		t.Errorf("rows = %d, want 2", len(root.VisibleRows()))
+	}
+}
+
+// A lone-subdirectory chain is one row, addressed by its last node.
+func TestFoldedChainIsOneRow(t *testing.T) {
+	root := Build(entries("proto/core/conditions/structs/a.proto", "proto/options/v1/o.proto"))
+
+	want := strings.TrimSpace(`
+root
+ proto/`)
+	if got := outline(root); got != want {
+		t.Errorf("outline:\n%s\nwant:\n%s", got, want)
+	}
+
+	SetExpanded(root.Find("proto"), true)
+	want = strings.TrimSpace(`
+root
+ proto/
+  core/conditions/structs/
+  options/v1/`)
+	if got := outline(root); got != want {
+		t.Errorf("expanded outline:\n%s\nwant:\n%s", got, want)
+	}
+
+	rows := root.VisibleRows()
+	chain := rows[2]
+	if chain.Node.Path != "proto/core/conditions/structs" {
+		t.Errorf("row node = %q, want the chain's last directory", chain.Node.Path)
+	}
+	// Every folded directory resolves to the row it renders on.
+	for _, path := range []string{"proto/core", "proto/core/conditions", "proto/core/conditions/structs"} {
+		if !chain.Contains(root.Find(path)) {
+			t.Errorf("row does not contain %q", path)
+		}
+	}
+}
+
+// Expanding any member of a chain opens the whole row, and the state
+// survives being set from the middle of the chain.
+func TestSetExpandedCoversWholeChain(t *testing.T) {
+	root := Build(entries("a/b/c/x.go"))
+	SetExpanded(root.Find("a/b"), true)
+
+	for _, path := range []string{"a", "a/b", "a/b/c"} {
+		if !root.Find(path).Expanded {
+			t.Errorf("%q not expanded", path)
+		}
+	}
+	if got := outline(root); got != "root\n a/b/c/\n  x.go" {
+		t.Errorf("outline:\n%s", got)
+	}
+
+	SetExpanded(root.Find("a/b/c"), false)
+	if root.Find("a").Expanded {
+		t.Error("collapsing the row left the chain head open")
+	}
+}
+
+func TestAnchorSkipsFoldedParents(t *testing.T) {
+	root := Build(entries("a/b/c/x.go", "top/one.go", "top/two.go"))
+
+	if got := Anchor(root.Find("a/b/c")); got != root.Find("a") {
+		t.Errorf("Anchor = %+v, want a", got)
+	}
+	// top holds two files, so it folds nothing and anchors itself.
+	if got := Anchor(root.Find("top")); got != root.Find("top") {
+		t.Errorf("Anchor(top) = %+v, want top", got)
+	}
+}
+
+func TestChildNamesPreviewsFoldedRows(t *testing.T) {
+	root := Build(entries(
+		"proto/core/conditions/c.proto",
+		"proto/options/v1/o.proto",
+		"proto/gen.go",
+	))
+	got := strings.Join(root.Find("proto").ChildNames(), " ")
+	if got != "core/conditions/ options/v1/ gen.go" {
+		t.Errorf("ChildNames = %q", got)
+	}
+}
+
+// Search offers one entry per possible row, but keeps the full path so a
+// folded segment still matches.
+func TestDirsSkipsFoldedDirectories(t *testing.T) {
+	root := Build(entries("proto/core/conditions/c.proto", "db/a.sql", "db/b.sql"))
+	var paths []string
+	for _, d := range root.Dirs() {
+		paths = append(paths, d.Path)
+	}
+	if strings.Join(paths, ",") != "db,proto/core/conditions" {
+		t.Errorf("Dirs = %v", paths)
 	}
 }
 

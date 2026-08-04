@@ -7,6 +7,7 @@ var (
 	selectedStyle = lipgloss.NewStyle().Reverse(true)
 	dirStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	statusStyle   = lipgloss.NewStyle().Faint(true)
+	ghostStyle    = lipgloss.NewStyle().Faint(true)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 	statusColors = map[byte]lipgloss.Style{

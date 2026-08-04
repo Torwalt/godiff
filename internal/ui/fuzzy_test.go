@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Torwalt/godiff/internal/tree"
@@ -58,9 +59,12 @@ func TestRankDirsFiltersAndEmptyQueryKeepsAll(t *testing.T) {
 	}
 }
 
-func TestDirsListsAllDirectoriesNoFiles(t *testing.T) {
+// Candidates are directories only, one per row: "db" folds into
+// "db/queries" and so is not offered separately.
+func TestDirsListsRowDirectoriesNoFiles(t *testing.T) {
 	entries := []tree.FileEntry{
 		{Path: "db/queries/q.sql", Status: 'M'},
+		{Path: "internal/app/x.go", Status: 'M'},
 		{Path: "top.txt", Status: 'M'},
 	}
 	dirs := tree.Build(entries).Dirs()
@@ -68,8 +72,12 @@ func TestDirsListsAllDirectoriesNoFiles(t *testing.T) {
 	for _, d := range dirs {
 		paths = append(paths, d.Path)
 	}
-	want := []string{"db", "db/queries"}
-	if len(paths) != 2 || paths[0] != want[0] || paths[1] != want[1] {
+	want := "db/queries,internal/app"
+	if strings.Join(paths, ",") != want {
 		t.Errorf("dirs = %v, want %v", paths, want)
+	}
+	// Folded segments stay searchable through the full path.
+	if _, ok := fuzzyMatch("db", "db/queries"); !ok {
+		t.Error("folded head no longer matches its row")
 	}
 }

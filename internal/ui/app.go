@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Torwalt/godiff/internal/gitx"
 	"github.com/Torwalt/godiff/internal/tree"
@@ -211,7 +212,7 @@ func (m *Model) selectedPath() string {
 
 func (m *Model) rowIndex(n *tree.Node) int {
 	for i, r := range m.rows {
-		if r.Node == n {
+		if r.Contains(n) {
 			return i
 		}
 	}
@@ -260,28 +261,31 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case key.Matches(msg, keys.Expand):
-		n := m.rows[m.cursor].Node
-		if len(n.Children) > 0 && !n.Expanded {
-			n.Expanded = true
+		r := m.rows[m.cursor]
+		if len(r.Node.Children) > 0 && !r.Expanded {
+			tree.SetExpanded(r.Node, true)
 			m.rows = m.root.VisibleRows()
 		}
 	case key.Matches(msg, keys.Collapse):
-		n := m.rows[m.cursor].Node
+		r := m.rows[m.cursor]
+		// The parent row is the one above the folded chain, not the chain's
+		// own second-to-last directory.
+		parent := tree.Anchor(r.Node).Parent
 		switch {
-		case n.Expanded && n.Kind != tree.KindRoot:
-			n.Expanded = false
+		case r.Expanded && r.Node.Kind != tree.KindRoot:
+			tree.SetExpanded(r.Node, false)
 			m.rows = m.root.VisibleRows()
-		case n.Parent != nil && n.Parent.Kind != tree.KindRoot:
-			m.cursor = m.rowIndex(n.Parent)
+		case parent != nil && parent.Kind != tree.KindRoot:
+			m.cursor = m.rowIndex(parent)
 		}
 	case key.Matches(msg, keys.Open):
-		n := m.rows[m.cursor].Node
-		if n.Kind == tree.KindDir {
-			n.Expanded = !n.Expanded
+		r := m.rows[m.cursor]
+		if r.Node.Kind == tree.KindDir {
+			tree.SetExpanded(r.Node, !r.Expanded)
 			m.rows = m.root.VisibleRows()
 			break
 		}
-		return m.openDiff(n)
+		return m.openDiff(r.Node)
 	case key.Matches(msg, keys.Diff):
 		return m.openDiff(m.rows[m.cursor].Node)
 	case key.Matches(msg, keys.Search):
@@ -339,7 +343,7 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.searchCursor < len(m.searchMatches) {
 			n := m.searchMatches[m.searchCursor]
 			tree.ExpandTo(n)
-			n.Expanded = true
+			tree.SetExpanded(n, true)
 			m.rows = m.root.VisibleRows()
 			m.cursor = m.rowIndex(n)
 			m.clampScroll()
@@ -465,39 +469,45 @@ func (m Model) viewTree() string {
 
 	visible := m.treeHeight()
 	end := min(m.offset+visible, len(m.rows))
+	bodies := make([]string, end-m.offset)
+	for i := range bodies {
+		bodies[i] = rowBody(m.rows[m.offset+i])
+	}
+	gutter := ghostGutter(bodies, m.width)
 	for i := m.offset; i < end; i++ {
-		b.WriteString(m.renderRow(m.rows[i], i == m.cursor))
+		body := bodies[i-m.offset]
+		line := body + m.ghost(m.rows[i], lipgloss.Width(body), gutter)
+		if i == m.cursor {
+			b.WriteString(selectedStyle.Render("›") + " " + line)
+		} else {
+			b.WriteString("  " + line)
+		}
 		b.WriteString("\n")
 	}
 	b.WriteString(m.footer())
 	return b.String()
 }
 
-func (m Model) renderRow(r tree.Row, selected bool) string {
+func rowBody(r tree.Row) string {
 	n := r.Node
 	indent := strings.Repeat("  ", r.Depth)
 
-	var line string
 	switch n.Kind {
-	case tree.KindRoot:
-		line = "(all changes)"
 	case tree.KindDir:
 		marker := "▸ "
-		if n.Expanded {
+		if r.Expanded {
 			marker = "▾ "
 		}
-		line = indent + marker + dirStyle.Render(n.Name+"/")
+		return indent + marker + dirStyle.Render(r.Label+"/")
 	case tree.KindFile:
-		name := n.Name
+		name := r.Label
 		if n.OldPath != "" {
 			name += " ← " + n.OldPath
 		}
-		line = indent + styleStatus(n.Status) + " " + name
+		return indent + styleStatus(n.Status) + " " + name
+	default:
+		return "(all changes)"
 	}
-	if selected {
-		return selectedStyle.Render("›") + " " + line
-	}
-	return "  " + line
 }
 
 func (m Model) footer() string {
