@@ -65,7 +65,7 @@ func run() error {
 		}
 	}
 
-	m := ui.New(repo, cfg.Comparisons, *comparison)
+	m := ui.New(repo, cfg.Comparisons, cfg.BaseBranch, cfg.Exclude, *comparison)
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }

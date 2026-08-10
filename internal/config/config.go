@@ -51,6 +51,7 @@ type Options struct {
 // Config is the merged, validated result.
 type Config struct {
 	BaseBranch  string
+	Exclude     []string
 	Comparisons []gitx.Comparison
 }
 
@@ -148,7 +149,11 @@ func Merge(files []File, opts Options) (*Config, error) {
 	for i := range comparisons {
 		comparisons[i].Exclude = append(normalizedGlobal, comparisons[i].Exclude...)
 	}
-	return &Config{BaseBranch: base, Comparisons: comparisons}, nil
+	return &Config{
+		BaseBranch:  base,
+		Exclude:     append([]string(nil), normalizedGlobal...),
+		Comparisons: comparisons,
+	}, nil
 }
 
 func builtins(base string) []gitx.Comparison {

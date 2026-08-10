@@ -16,7 +16,8 @@ exclude = [
 ]
 
 # Add a new comparison, or override a built-in by reusing its id
-# (built-ins: worktree, staged, branch, commit).
+# (built-ins: worktree, staged, branch, commit). "From Log" is a dynamic UI
+# choice rather than a configurable comparison.
 [[comparisons]]
 id = "last"
 label = "Last commit range"

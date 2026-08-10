@@ -22,10 +22,14 @@ type screen int
 
 const (
 	screenSelector screen = iota
+	screenLogLoading
+	screenLog
 	screenLoading
 	screenTree
 	screenSearch
 )
+
+const logPageSize = 10
 
 // selectorShortcuts maps built-in comparison IDs to a single key that both
 // jumps to and opens that comparison. User-defined comparisons get none.
@@ -34,6 +38,19 @@ var selectorShortcuts = map[string]string{
 	"staged":   "s",
 	"branch":   "m",
 	"commit":   "c",
+}
+
+type selectorEntry struct {
+	comparison int
+	fromLog    bool
+}
+
+type commitsMsg struct {
+	page    int
+	cursor  int
+	commits []gitx.Commit
+	hasNext bool
+	err     error
 }
 
 type discoveredMsg struct {
@@ -49,12 +66,21 @@ type diffDoneMsg struct{ err error }
 type Model struct {
 	repo        *gitx.Repo
 	comparisons []gitx.Comparison
+	baseBranch  string
+	exclude     []string
 
 	screen screen
 	status string // last status or error message, shown on the active screen
 
 	// selector state
 	selCursor int
+
+	// commit log state
+	logCommits  []gitx.Commit
+	logPage     int
+	logCursor   int
+	logHasNext  bool
+	fromLogTree bool
 
 	// tree state
 	active *gitx.Comparison
@@ -75,10 +101,12 @@ type Model struct {
 
 // New builds the initial model. If startID is non-empty the matching
 // comparison is discovered immediately instead of showing the selector.
-func New(repo *gitx.Repo, comparisons []gitx.Comparison, startID string) Model {
+func New(repo *gitx.Repo, comparisons []gitx.Comparison, baseBranch string, exclude []string, startID string) Model {
 	m := Model{
 		repo:        repo,
 		comparisons: comparisons,
+		baseBranch:  baseBranch,
+		exclude:     append([]string(nil), exclude...),
 		screen:      screenSelector,
 		spin:        spinner.New(spinner.WithSpinner(spinner.Dot)),
 		help:        help.New(),
@@ -86,11 +114,11 @@ func New(repo *gitx.Repo, comparisons []gitx.Comparison, startID string) Model {
 		height:      24,
 	}
 	if startID != "" {
-		for i, c := range comparisons {
-			if c.ID == startID {
+		for i, entry := range m.selectorEntries() {
+			if !entry.fromLog && comparisons[entry.comparison].ID == startID {
 				m.selCursor = i
 				m.screen = screenLoading
-				m.active = &m.comparisons[i]
+				m.active = &m.comparisons[entry.comparison]
 			}
 		}
 	}
@@ -115,6 +143,15 @@ func (m Model) discover(cmp gitx.Comparison, refresh bool) tea.Cmd {
 	}
 }
 
+func (m Model) loadLogPage(page, cursor int) tea.Cmd {
+	repo := m.repo
+	base := m.baseBranch
+	return func() tea.Msg {
+		commits, hasNext, err := repo.LogPage(base, page*logPageSize, logPageSize)
+		return commitsMsg{page: page, cursor: cursor, commits: commits, hasNext: hasNext, err: err}
+	}
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -125,7 +162,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.screen != screenLoading {
+		if m.screen != screenLoading && m.screen != screenLogLoading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -134,6 +171,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveredMsg:
 		return m.onDiscovered(msg)
+
+	case commitsMsg:
+		return m.onCommits(msg)
 
 	case diffDoneMsg:
 		if msg.err != nil {
@@ -145,11 +185,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.screen {
 		case screenSelector:
 			return m.updateSelector(msg)
+		case screenLog:
+			return m.updateLog(msg)
 		case screenTree:
 			return m.updateTree(msg)
 		case screenSearch:
 			return m.updateSearch(msg)
-		case screenLoading:
+		case screenLoading, screenLogLoading:
 			if msg.String() == "q" || msg.String() == "ctrl+c" {
 				return m, tea.Quit
 			}
@@ -164,10 +206,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.status = errorStyle.Render(msg.err.Error())
+		if len(m.logCommits) == 0 {
+			m.screen = screenSelector
+		} else {
+			m.screen = screenLog
+		}
+		return m, nil
+	}
+
+	m.logCommits = msg.commits
+	m.logPage = msg.page
+	m.logCursor = min(msg.cursor, max(len(msg.commits)-1, 0))
+	m.logHasNext = msg.hasNext
+	m.status = ""
+	m.screen = screenLog
+	return m, nil
+}
+
 func (m Model) onDiscovered(msg discoveredMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.status = errorStyle.Render(msg.err.Error())
-		if m.root == nil {
+		if m.fromLogTree && !msg.refresh {
+			m.screen = screenLog
+		} else if m.root == nil {
 			m.screen = screenSelector // discovery never succeeded: go back
 		} else {
 			m.screen = screenTree // keep the stale tree usable
@@ -220,32 +284,120 @@ func (m *Model) rowIndex(n *tree.Node) int {
 }
 
 func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	entries := m.selectorEntries()
 	switch msg.String() {
 	case "up", "k":
 		if m.selCursor > 0 {
 			m.selCursor--
 		}
 	case "down", "j":
-		if m.selCursor < len(m.comparisons)-1 {
+		if m.selCursor < len(entries)-1 {
 			m.selCursor++
 		}
 	case "enter":
-		cmp := m.comparisons[m.selCursor]
-		m.screen = screenLoading
-		m.status = ""
-		return m, tea.Batch(m.spin.Tick, m.discover(cmp, false))
+		return m.openSelectorEntry(entries[m.selCursor])
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
+	case "l":
+		for i, entry := range entries {
+			if entry.fromLog {
+				m.selCursor = i
+				return m.startLog()
+			}
+		}
 	default:
-		for i, c := range m.comparisons {
+		for i, entry := range entries {
+			if entry.fromLog {
+				continue
+			}
+			c := m.comparisons[entry.comparison]
 			if k, ok := selectorShortcuts[c.ID]; !ok || k != msg.String() {
 				continue
 			}
 			m.selCursor = i
-			m.screen = screenLoading
-			m.status = ""
-			return m, tea.Batch(m.spin.Tick, m.discover(c, false))
+			return m.startComparison(c, false)
 		}
+	}
+	return m, nil
+}
+
+func (m Model) selectorEntries() []selectorEntry {
+	entries := make([]selectorEntry, 0, len(m.comparisons)+1)
+	insertedLog := false
+	for i, c := range m.comparisons {
+		entries = append(entries, selectorEntry{comparison: i})
+		if c.ID == "commit" {
+			entries = append(entries, selectorEntry{fromLog: true})
+			insertedLog = true
+		}
+	}
+	if !insertedLog {
+		entries = append(entries, selectorEntry{fromLog: true})
+	}
+	return entries
+}
+
+func (m Model) openSelectorEntry(entry selectorEntry) (tea.Model, tea.Cmd) {
+	if entry.fromLog {
+		return m.startLog()
+	}
+	return m.startComparison(m.comparisons[entry.comparison], false)
+}
+
+func (m Model) startComparison(cmp gitx.Comparison, fromLog bool) (tea.Model, tea.Cmd) {
+	m.active = &cmp
+	m.fromLogTree = fromLog
+	m.screen = screenLoading
+	m.status = ""
+	return m, tea.Batch(m.spin.Tick, m.discover(cmp, false))
+}
+
+func (m Model) startLog() (tea.Model, tea.Cmd) {
+	m.logCommits = nil
+	m.logPage = 0
+	m.logCursor = 0
+	m.logHasNext = false
+	m.fromLogTree = false
+	m.screen = screenLogLoading
+	m.status = ""
+	return m, tea.Batch(m.spin.Tick, m.loadLogPage(0, 0))
+}
+
+func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.logCursor > 0 {
+			m.logCursor--
+		} else if m.logPage > 0 {
+			m.screen = screenLogLoading
+			m.status = ""
+			return m, tea.Batch(m.spin.Tick, m.loadLogPage(m.logPage-1, logPageSize-1))
+		}
+	case "down", "j":
+		if m.logCursor < len(m.logCommits)-1 {
+			m.logCursor++
+		} else if m.logHasNext {
+			m.screen = screenLogLoading
+			m.status = ""
+			return m, tea.Batch(m.spin.Tick, m.loadLogPage(m.logPage+1, 0))
+		}
+	case "enter":
+		if m.logCursor < len(m.logCommits) {
+			commit := m.logCommits[m.logCursor]
+			cmp := gitx.Comparison{
+				ID:      "log:" + commit.SHA,
+				Label:   commit.ShortSHA + " " + commit.Subject,
+				Kind:    gitx.KindShow,
+				Args:    []string{commit.SHA},
+				Exclude: append([]string(nil), m.exclude...),
+			}
+			return m.startComparison(cmp, true)
+		}
+	case "esc", "b":
+		m.screen = screenSelector
+		m.status = ""
+	case "q", "ctrl+c":
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -294,7 +446,11 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenLoading
 		return m, tea.Batch(m.spin.Tick, m.discover(*m.active, true))
 	case key.Matches(msg, keys.Back):
-		m.screen = screenSelector
+		if m.fromLogTree {
+			m.screen = screenLog
+		} else {
+			m.screen = screenSelector
+		}
 		m.status = ""
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
@@ -388,6 +544,10 @@ func (m Model) View() string {
 	switch m.screen {
 	case screenSelector:
 		return m.viewSelector()
+	case screenLogLoading:
+		return fmt.Sprintf("\n %s loading commits against %s…\n", m.spin.View(), m.baseBranch)
+	case screenLog:
+		return m.viewLog()
 	case screenLoading:
 		label := ""
 		if m.active != nil {
@@ -437,10 +597,14 @@ func (m Model) viewSelector() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("godiff — select comparison"))
 	b.WriteString("\n\n")
-	for i, c := range m.comparisons {
-		label := c.Label
-		if k, ok := selectorShortcuts[c.ID]; ok {
-			label += " (" + k + ")"
+	for i, entry := range m.selectorEntries() {
+		label := "From Log (l)"
+		if !entry.fromLog {
+			c := m.comparisons[entry.comparison]
+			label = c.Label
+			if k, ok := selectorShortcuts[c.ID]; ok {
+				label += " (" + k + ")"
+			}
 		}
 		line := "  " + label
 		if i == m.selCursor {
@@ -453,6 +617,32 @@ func (m Model) viewSelector() string {
 		b.WriteString(m.status + "\n")
 	}
 	b.WriteString(statusStyle.Render("enter open · ↑/↓ move · q quit"))
+	return b.String()
+}
+
+func (m Model) viewLog() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("godiff — commits against " + m.baseBranch))
+	b.WriteString("\n\n")
+	if len(m.logCommits) == 0 {
+		b.WriteString("  no commits\n")
+	}
+	for i, commit := range m.logCommits {
+		label := commit.ShortSHA + " " + commit.Subject
+		line := "  " + label
+		if i == m.logCursor {
+			line = selectedStyle.Render("> " + label)
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("\n")
+	if m.status != "" {
+		b.WriteString(m.status + "\n")
+	}
+	b.WriteString(statusStyle.Render(fmt.Sprintf(
+		"page %d · enter open · ↑/↓ move/page · esc back · q quit",
+		m.logPage+1,
+	)))
 	return b.String()
 }
 

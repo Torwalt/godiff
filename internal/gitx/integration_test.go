@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,5 +152,49 @@ func TestDiscoverEmptyComparison(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Errorf("files = %+v, want none", files)
+	}
+}
+
+func TestLogPagePaginatesCommitsSinceBase(t *testing.T) {
+	repo := testRepo(t)
+	git(t, repo.Root, "checkout", "-b", "feature")
+	for i := 1; i <= 12; i++ {
+		write(t, repo.Root, "README.md", fmt.Sprintf("change %d\n", i))
+		git(t, repo.Root, "add", "README.md")
+		git(t, repo.Root, "commit", "-m", fmt.Sprintf("feature %02d", i))
+	}
+
+	first, hasNext, err := repo.LogPage("master", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 10 || !hasNext {
+		t.Fatalf("first page len=%d hasNext=%v, want 10 true", len(first), hasNext)
+	}
+	if first[0].Subject != "feature 12" || first[9].Subject != "feature 03" {
+		t.Errorf("first page bounds = %q..%q", first[0].Subject, first[9].Subject)
+	}
+
+	second, hasNext, err := repo.LogPage("master", 10, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 2 || hasNext {
+		t.Fatalf("second page len=%d hasNext=%v, want 2 false", len(second), hasNext)
+	}
+	if second[0].Subject != "feature 02" || second[1].Subject != "feature 01" {
+		t.Errorf("second page = %+v", second)
+	}
+	for _, commit := range append(first, second...) {
+		if commit.SHA == "" || commit.ShortSHA == "" || commit.Subject == "initial" {
+			t.Errorf("unexpected commit: %+v", commit)
+		}
+	}
+}
+
+func TestLogPageInvalidBase(t *testing.T) {
+	repo := testRepo(t)
+	if _, _, err := repo.LogPage("missing-base", 0, 10); err == nil {
+		t.Fatal("expected error for invalid base")
 	}
 }

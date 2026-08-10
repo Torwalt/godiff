@@ -24,8 +24,9 @@ godiff -base develop        # override the base branch for this run
 godiff -print-config        # show effective comparisons and exclusions
 ```
 
-Built-in comparisons: working tree, staged changes, branch against the
-configured base (`master` by default), and the current commit.
+Built-in choices: working tree, staged changes, branch against the configured
+base (`master` by default), the current commit, and **From Log**. From Log lists
+commits in `<base>..HEAD` ten at a time; opening one reviews only that commit.
 
 ### Keys
 
@@ -40,6 +41,11 @@ configured base (`master` by default), and the current commit.
 | `esc`/`b` | back to the comparison selector |
 | `?` | toggle full key help |
 | `q` | quit |
+
+In From Log, `↑/k` and `↓/j` move between commits and cross page boundaries,
+`enter` opens the selected commit, and `esc/b` returns to the comparison
+selector. Returning from a commit's file tree restores the same log page and
+selection.
 
 ## Configuration
 

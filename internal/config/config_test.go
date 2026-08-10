@@ -97,6 +97,9 @@ func TestMergeExclusions(t *testing.T) {
 	if !reflect.DeepEqual(wt.Exclude, want) {
 		t.Errorf("exclude = %v, want %v", wt.Exclude, want)
 	}
+	if !reflect.DeepEqual(cfg.Exclude, want[:2]) {
+		t.Errorf("shared exclude = %v, want %v", cfg.Exclude, want[:2])
+	}
 	// comparisons without their own excludes still get the shared ones
 	staged, _ := cfg.Comparison("staged")
 	if !reflect.DeepEqual(staged.Exclude, want[:2]) {
