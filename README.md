@@ -25,8 +25,8 @@ godiff -print-config        # show effective comparisons and exclusions
 ```
 
 Built-in choices: working tree, staged changes, branch against the configured
-base (`master` by default), the current commit, and **From Log**. From Log lists
-commits in `<base>..HEAD` ten at a time; opening one reviews only that commit.
+base (`master` by default), the current commit, and **Show commit**. Show commit
+lists the history reachable from `HEAD`; opening one reviews only that commit.
 
 ### Keys
 
@@ -42,10 +42,12 @@ commits in `<base>..HEAD` ten at a time; opening one reviews only that commit.
 | `?` | toggle full key help |
 | `q` | quit |
 
-In From Log, `↑/k` and `↓/j` move between commits and cross page boundaries,
-`enter` opens the selected commit, and `esc/b` returns to the comparison
-selector. Returning from a commit's file tree restores the same log page and
-selection.
+In Show commit, `↑/k` and `↓/j` scroll through commits, `/` searches commit
+subjects, and `ctrl-v` starts a search with the clipboard contents. While
+searching, ordinary keys edit the query, arrows choose a result, `esc` returns
+to navigation, and `enter` opens the selected commit. A full or abbreviated SHA
+can select a commit outside the current `HEAD` history. Returning from a
+commit's file tree restores the same selection.
 
 ## Configuration
 

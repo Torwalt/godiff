@@ -155,46 +155,71 @@ func TestDiscoverEmptyComparison(t *testing.T) {
 	}
 }
 
-func TestLogPagePaginatesCommitsSinceBase(t *testing.T) {
+func TestLogPagePaginatesHeadHistory(t *testing.T) {
 	repo := testRepo(t)
-	git(t, repo.Root, "checkout", "-b", "feature")
 	for i := 1; i <= 12; i++ {
 		write(t, repo.Root, "README.md", fmt.Sprintf("change %d\n", i))
 		git(t, repo.Root, "add", "README.md")
-		git(t, repo.Root, "commit", "-m", fmt.Sprintf("feature %02d", i))
+		git(t, repo.Root, "commit", "-m", fmt.Sprintf("change %02d", i))
 	}
 
-	first, hasNext, err := repo.LogPage("master", 0, 10)
+	first, hasNext, err := repo.LogPage("", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first) != 10 || !hasNext {
 		t.Fatalf("first page len=%d hasNext=%v, want 10 true", len(first), hasNext)
 	}
-	if first[0].Subject != "feature 12" || first[9].Subject != "feature 03" {
+	if first[0].Subject != "change 12" || first[9].Subject != "change 03" {
 		t.Errorf("first page bounds = %q..%q", first[0].Subject, first[9].Subject)
 	}
 
-	second, hasNext, err := repo.LogPage("master", 10, 10)
+	second, hasNext, err := repo.LogPage("", 10, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(second) != 2 || hasNext {
-		t.Fatalf("second page len=%d hasNext=%v, want 2 false", len(second), hasNext)
+	if len(second) != 3 || hasNext {
+		t.Fatalf("second page len=%d hasNext=%v, want 3 false", len(second), hasNext)
 	}
-	if second[0].Subject != "feature 02" || second[1].Subject != "feature 01" {
+	if second[0].Subject != "change 02" || second[2].Subject != "initial" {
 		t.Errorf("second page = %+v", second)
 	}
 	for _, commit := range append(first, second...) {
-		if commit.SHA == "" || commit.ShortSHA == "" || commit.Subject == "initial" {
+		if commit.SHA == "" || commit.ShortSHA == "" {
 			t.Errorf("unexpected commit: %+v", commit)
 		}
 	}
 }
 
-func TestLogPageInvalidBase(t *testing.T) {
+func TestLogPageSearchesSubjectsAndResolvesSHA(t *testing.T) {
 	repo := testRepo(t)
-	if _, _, err := repo.LogPage("missing-base", 0, 10); err == nil {
-		t.Fatal("expected error for invalid base")
+	write(t, repo.Root, "README.md", "needle\n")
+	git(t, repo.Root, "add", "README.md")
+	git(t, repo.Root, "commit", "-m", "Add Search Needle")
+
+	matches, hasNext, err := repo.LogPage("search needle", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 || hasNext || matches[0].Subject != "Add Search Needle" {
+		t.Fatalf("subject search = %+v, hasNext=%v", matches, hasNext)
+	}
+
+	git(t, repo.Root, "checkout", "-b", "hidden")
+	write(t, repo.Root, "README.md", "hidden\n")
+	git(t, repo.Root, "add", "README.md")
+	git(t, repo.Root, "commit", "-m", "Hidden branch commit")
+	hidden, _, err := repo.LogPage("hidden branch", 0, 10)
+	if err != nil || len(hidden) != 1 {
+		t.Fatalf("hidden commit = %+v, err=%v", hidden, err)
+	}
+	git(t, repo.Root, "checkout", "master")
+
+	bySHA, hasNext, err := repo.LogPage(hidden[0].ShortSHA, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bySHA) != 1 || hasNext || bySHA[0].SHA != hidden[0].SHA {
+		t.Fatalf("SHA search = %+v, hasNext=%v", bySHA, hasNext)
 	}
 }

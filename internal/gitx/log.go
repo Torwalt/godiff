@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Commit is one entry in a repository log.
@@ -15,21 +16,35 @@ type Commit struct {
 	Subject  string
 }
 
-// LogPage returns a page of commits reachable from HEAD but not base, newest
-// first. The extra record requested from git is used only to report whether a
+// LogPage returns a page of commits reachable from HEAD, newest first. A
+// non-empty query searches subjects case-insensitively; an unambiguous
+// hexadecimal object ID resolves directly, even when it is not reachable from
+// HEAD. The extra record requested from git is used only to report whether a
 // following page exists.
-func (r *Repo) LogPage(base string, offset, limit int) ([]Commit, bool, error) {
+func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) {
 	if offset < 0 || limit < 1 {
 		return nil, false, fmt.Errorf("invalid log page: offset %d, limit %d", offset, limit)
 	}
 
-	rangeArg := base + "..HEAD"
+	query = strings.TrimSpace(query)
+	if isHexObjectID(query) {
+		if commit, ok := r.resolveCommit(query); ok {
+			if offset > 0 {
+				return nil, false, nil
+			}
+			return []Commit{commit}, false, nil
+		}
+	}
+
 	args := []string{
 		"--no-pager", "log", "-z", "--format=%H%x00%h%x00%s",
 		"--skip=" + strconv.Itoa(offset),
 		"--max-count=" + strconv.Itoa(limit+1),
-		rangeArg,
 	}
+	if query != "" {
+		args = append(args, "--regexp-ignore-case", "--fixed-strings", "--grep="+query)
+	}
+	args = append(args, "HEAD")
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Root
 	var out, stderr bytes.Buffer
@@ -40,7 +55,7 @@ func (r *Repo) LogPage(base string, offset, limit int) ([]Commit, bool, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, false, fmt.Errorf("git log (%s): %s", rangeArg, msg)
+		return nil, false, fmt.Errorf("git log (HEAD): %s", msg)
 	}
 
 	commits, err := ParseLog(out.Bytes())
@@ -52,6 +67,36 @@ func (r *Repo) LogPage(base string, offset, limit int) ([]Commit, bool, error) {
 		commits = commits[:limit]
 	}
 	return commits, hasNext, nil
+}
+
+func (r *Repo) resolveCommit(id string) (Commit, bool) {
+	args := []string{
+		"--no-pager", "show", "-s", "-z", "--format=%H%x00%h%x00%s",
+		id + "^{commit}",
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Root
+	out, err := cmd.Output()
+	if err != nil {
+		return Commit{}, false
+	}
+	commits, err := ParseLog(out)
+	if err != nil || len(commits) != 1 {
+		return Commit{}, false
+	}
+	return commits[0], true
+}
+
+func isHexObjectID(s string) bool {
+	if len(s) < 4 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.Is(unicode.ASCII_Hex_Digit, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseLog parses the NUL-delimited full SHA, abbreviated SHA, and subject

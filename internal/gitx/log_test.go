@@ -35,8 +35,24 @@ func TestParseLogMalformed(t *testing.T) {
 func TestLogPageRejectsInvalidBounds(t *testing.T) {
 	repo := &Repo{}
 	for _, bounds := range [][2]int{{-1, 10}, {0, 0}} {
-		if _, _, err := repo.LogPage("master", bounds[0], bounds[1]); err == nil {
+		if _, _, err := repo.LogPage("", bounds[0], bounds[1]); err == nil {
 			t.Errorf("LogPage offset=%d limit=%d: expected error", bounds[0], bounds[1])
+		}
+	}
+}
+
+func TestHexObjectID(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  bool
+	}{
+		{value: "1a2B", want: true},
+		{value: "abcdef0123456789", want: true},
+		{value: "abc", want: false},
+		{value: "not-a-sha", want: false},
+	} {
+		if got := isHexObjectID(test.value); got != test.want {
+			t.Errorf("isHexObjectID(%q) = %v, want %v", test.value, got, test.want)
 		}
 	}
 }
