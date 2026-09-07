@@ -8,6 +8,9 @@ import "os/exec"
 // which connects it to the terminal so git can run its configured pager.
 func (r *Repo) DisplayCmd(cmp Comparison, pathspec string) *exec.Cmd {
 	args := []string{cmp.subcommand()}
+	if cmp.Kind == KindShow {
+		args = append(args, "--format=")
+	}
 	args = append(args, cmp.Args...)
 	if pathspec != "" || len(cmp.Exclude) > 0 {
 		args = append(args, "--")

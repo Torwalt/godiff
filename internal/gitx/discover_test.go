@@ -98,7 +98,15 @@ func TestDisplayCmdArgs(t *testing.T) {
 			name:     "show single file",
 			cmp:      Comparison{Kind: KindShow, Args: []string{"HEAD"}},
 			pathspec: "db/queries/foo.sql",
-			want:     []string{"git", "show", "HEAD", "--", "db/queries/foo.sql"},
+			want:     []string{"git", "show", "--format=", "HEAD", "--", "db/queries/foo.sql"},
+		},
+		{
+			name: "show format override",
+			cmp: Comparison{
+				Kind: KindShow,
+				Args: []string{"--format=oneline", "HEAD"},
+			},
+			want: []string{"git", "show", "--format=", "--format=oneline", "HEAD"},
 		},
 	}
 	for _, tt := range tests {

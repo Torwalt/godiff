@@ -1,6 +1,7 @@
 package gitx
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -114,6 +115,24 @@ func TestDiscoverShowCommit(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Path != "proto/contract/v1/x.proto" || files[0].Status != 'A' {
 		t.Errorf("files = %+v", files)
+	}
+}
+
+func TestDisplayShowOmitsCommitMessage(t *testing.T) {
+	repo := testRepo(t)
+	write(t, repo.Root, "feature.txt", "content\n")
+	git(t, repo.Root, "add", "feature.txt")
+	git(t, repo.Root, "commit", "-m", "MESSAGE-MUST-NOT-APPEAR")
+
+	out, err := repo.DisplayCmd(Comparison{Kind: KindShow, Args: []string{"HEAD"}}, "").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(out, []byte("MESSAGE-MUST-NOT-APPEAR")) {
+		t.Errorf("display output includes commit message:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte("diff --git a/feature.txt b/feature.txt")) {
+		t.Errorf("display output is missing patch:\n%s", out)
 	}
 }
 
