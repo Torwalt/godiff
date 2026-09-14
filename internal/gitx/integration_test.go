@@ -242,3 +242,47 @@ func TestLogPageSearchesSubjectsAndResolvesSHA(t *testing.T) {
 		t.Fatalf("SHA search = %+v, hasNext=%v", bySHA, hasNext)
 	}
 }
+
+func TestResolveCommit(t *testing.T) {
+	repo := testRepo(t)
+	commit, err := repo.ResolveCommit("master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit.SHA == "" || commit.ShortSHA == "" || commit.Subject != "initial" {
+		t.Errorf("commit = %+v", commit)
+	}
+	if _, err := repo.ResolveCommit("not-a-revision"); err == nil {
+		t.Fatal("expected invalid revision error")
+	}
+}
+
+func TestDiscoverInclusiveCommitRange(t *testing.T) {
+	repo := testRepo(t)
+	write(t, repo.Root, "first.txt", "first\n")
+	git(t, repo.Root, "add", "first.txt")
+	git(t, repo.Root, "commit", "-m", "first change")
+	first, err := repo.ResolveCommit("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, repo.Root, "second.txt", "second\n")
+	git(t, repo.Root, "add", "second.txt")
+	git(t, repo.Root, "commit", "-m", "second change")
+	newest, err := repo.ResolveCommit("HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := repo.Discover(Comparison{
+		Kind: KindDiff,
+		Args: []string{first.SHA + "^", newest.SHA},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || files[0].Path != "first.txt" || files[1].Path != "second.txt" {
+		t.Errorf("range files = %+v", files)
+	}
+}

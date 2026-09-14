@@ -60,6 +60,7 @@ type commitsMsg struct {
 	append  bool
 	commits []gitx.Commit
 	hasNext bool
+	baseSHA string
 	err     error
 }
 
@@ -77,6 +78,7 @@ type Model struct {
 	repo        *gitx.Repo
 	comparisons []gitx.Comparison
 	exclude     []string
+	baseBranch  string
 
 	screen screen
 	status string // last status or error message, shown on the active screen
@@ -93,6 +95,8 @@ type Model struct {
 	logMode        logMode
 	logInput       textinput.Model
 	logRequest     uint64
+	logAnchor      int
+	baseSHA        string
 	fromCommitTree bool
 
 	// tree state
@@ -114,12 +118,14 @@ type Model struct {
 
 // New builds the initial model. If startID is non-empty the matching
 // comparison is discovered immediately instead of showing the selector.
-func New(repo *gitx.Repo, comparisons []gitx.Comparison, exclude []string, startID string) Model {
+func New(repo *gitx.Repo, comparisons []gitx.Comparison, exclude []string, baseBranch, startID string) Model {
 	m := Model{
 		repo:        repo,
 		comparisons: comparisons,
 		exclude:     append([]string(nil), exclude...),
+		baseBranch:  baseBranch,
 		screen:      screenSelector,
+		logAnchor:   -1,
 		spin:        spinner.New(spinner.WithSpinner(spinner.Dot)),
 		help:        help.New(),
 		width:       80,
@@ -157,13 +163,21 @@ func (m Model) discover(cmp gitx.Comparison, refresh bool) tea.Cmd {
 
 func (m Model) loadLogPage(query string, offset int, appendPage bool, request uint64) tea.Cmd {
 	repo := m.repo
+	baseBranch := m.baseBranch
 	return func() tea.Msg {
 		commits, hasNext, err := repo.LogPage(query, offset, commitBatchSize)
+		baseSHA := ""
+		if offset == 0 && baseBranch != "" {
+			if base, resolveErr := repo.ResolveCommit(baseBranch); resolveErr == nil {
+				baseSHA = base.SHA
+			}
+		}
 		return commitsMsg{
 			request: request,
 			append:  appendPage,
 			commits: commits,
 			hasNext: hasNext,
+			baseSHA: baseSHA,
 			err:     err,
 		}
 	}
@@ -252,6 +266,8 @@ func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
 		m.logCommits = msg.commits
 		m.logCursor = 0
 		m.logOffset = 0
+		m.logAnchor = -1
+		m.baseSHA = msg.baseSHA
 	}
 	m.logHasNext = msg.hasNext
 	m.status = ""
@@ -394,6 +410,8 @@ func (m Model) startLog() (tea.Model, tea.Cmd) {
 	m.logLoading = true
 	m.logMode = logNavigate
 	m.logInput = newLogInput()
+	m.logAnchor = -1
+	m.baseSHA = ""
 	m.logRequest++
 	m.fromCommitTree = false
 	m.screen = screenLogLoading
@@ -436,6 +454,15 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveLogCursor(1)
 	case "enter":
 		return m.openLogCommit()
+	case " ":
+		if len(m.logCommits) == 0 {
+			break
+		}
+		if m.logAnchor >= 0 {
+			m.logAnchor = -1
+		} else {
+			m.logAnchor = m.logCursor
+		}
 	case "/":
 		m.logMode = logSearch
 		m.logInput.Focus()
@@ -485,6 +512,7 @@ func (m Model) reloadLog() (tea.Model, tea.Cmd) {
 	m.logOffset = 0
 	m.logHasNext = false
 	m.logLoading = true
+	m.logAnchor = -1
 	m.status = ""
 	return m, tea.Batch(
 		m.spin.Tick,
@@ -513,11 +541,16 @@ func (m Model) openLogCommit() (tea.Model, tea.Cmd) {
 	if m.logCursor >= len(m.logCommits) {
 		return m, nil
 	}
-	commit := m.logCommits[m.logCursor]
 	m.logMode = logNavigate
 	m.logInput.Blur()
 	m.logRequest++
 	m.logLoading = false
+	cmp := m.logComparison()
+	return m.startComparison(cmp, true)
+}
+
+func (m Model) logComparison() gitx.Comparison {
+	commit := m.logCommits[m.logCursor]
 	cmp := gitx.Comparison{
 		ID:      "show:" + commit.SHA,
 		Label:   commit.ShortSHA + " " + commit.Subject,
@@ -525,7 +558,25 @@ func (m Model) openLogCommit() (tea.Model, tea.Cmd) {
 		Args:    []string{commit.SHA},
 		Exclude: append([]string(nil), m.exclude...),
 	}
-	return m.startComparison(cmp, true)
+	if m.logAnchor < 0 || m.logAnchor == m.logCursor || m.logAnchor >= len(m.logCommits) {
+		return cmp
+	}
+
+	start, end := m.logSelectionBounds()
+	newer := m.logCommits[start]
+	older := m.logCommits[end]
+	cmp.ID = "range:" + older.SHA + ".." + newer.SHA
+	cmp.Label = fmt.Sprintf("%s…%s (%d commits)", older.ShortSHA, newer.ShortSHA, end-start+1)
+	cmp.Kind = gitx.KindDiff
+	cmp.Args = []string{older.SHA + "^", newer.SHA}
+	return cmp
+}
+
+func (m Model) logSelectionBounds() (int, int) {
+	if m.logAnchor < m.logCursor {
+		return m.logAnchor, m.logCursor
+	}
+	return m.logCursor, m.logAnchor
 }
 
 func (m Model) leaveLog() (tea.Model, tea.Cmd) {
@@ -799,10 +850,14 @@ func (m Model) viewLog() string {
 	end := min(m.logOffset+m.logHeight(), len(m.logCommits))
 	for i := m.logOffset; i < end; i++ {
 		commit := m.logCommits[i]
-		label := commit.ShortSHA + " " + commit.Subject
-		line := "  " + label
+		label := m.logRangeMarker(i) + commit.ShortSHA + " " + commit.Subject
+		marker := ""
+		if commit.SHA == m.baseSHA {
+			marker = "  " + baseStyle.Render("◆ "+m.baseBranch)
+		}
+		line := "  " + label + marker
 		if i == m.logCursor {
-			line = selectedStyle.Render("> " + label)
+			line = selectedStyle.Render("> "+label) + marker
 		}
 		b.WriteString(line + "\n")
 	}
@@ -813,11 +868,33 @@ func (m Model) viewLog() string {
 	if m.logMode == logSearch {
 		b.WriteString(statusStyle.Render("enter open · ↑/↓ choose · esc navigate · ctrl-v paste"))
 	} else if m.logInput.Value() != "" {
-		b.WriteString(statusStyle.Render("enter open · ↑/k ↓/j move · / edit · esc clear · b back"))
+		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / edit · esc clear · b back"))
+	} else if m.logAnchor >= 0 {
+		b.WriteString(statusStyle.Render("enter open range · space clear · ↑/k ↓/j move · / search · esc back"))
 	} else {
-		b.WriteString(statusStyle.Render("enter open · ↑/k ↓/j move · / search · ctrl-v paste · esc back"))
+		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / search · ctrl-v paste · esc back"))
 	}
 	return b.String()
+}
+
+func (m Model) logRangeMarker(index int) string {
+	if m.logAnchor < 0 || m.logAnchor >= len(m.logCommits) {
+		return ""
+	}
+	start, end := m.logSelectionBounds()
+	if start == end && index == start {
+		return "● start "
+	}
+	switch {
+	case index == start:
+		return "┌ start "
+	case index == end:
+		return "└ end   "
+	case index > start && index < end:
+		return "│       "
+	default:
+		return "        "
+	}
 }
 
 func (m Model) viewTree() string {

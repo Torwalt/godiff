@@ -65,9 +65,39 @@ func run() error {
 		}
 	}
 
-	m := ui.New(repo, cfg.Comparisons, cfg.Exclude, *comparison)
+	startID := *comparison
+	positional, ok, err := positionalComparison(flag.Args(), cfg.Exclude)
+	if err != nil {
+		return err
+	}
+	if ok {
+		if startID != "" {
+			return fmt.Errorf("cannot combine a commit argument with -comparison")
+		}
+		cfg.Comparisons = append(cfg.Comparisons, positional)
+		startID = positional.ID
+	}
+
+	m := ui.New(repo, cfg.Comparisons, cfg.Exclude, cfg.BaseBranch, startID)
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
+}
+
+func positionalComparison(args, exclude []string) (gitx.Comparison, bool, error) {
+	if len(args) == 0 {
+		return gitx.Comparison{}, false, nil
+	}
+	if len(args) > 1 {
+		return gitx.Comparison{}, false, fmt.Errorf("expected at most one commit argument, got %d", len(args))
+	}
+	revision := args[0]
+	return gitx.Comparison{
+		ID:      "show:" + revision,
+		Label:   "Commit " + revision,
+		Kind:    gitx.KindShow,
+		Args:    []string{revision},
+		Exclude: append([]string(nil), exclude...),
+	}, true, nil
 }
 
 func printEffectiveConfig(repo *gitx.Repo, cfg *config.Config) {

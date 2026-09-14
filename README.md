@@ -19,6 +19,7 @@ open-in-neovim workflow keep working unchanged.
 
 ```
 godiff                      # comparison selector
+godiff 636c8908c            # jump straight to a commit
 godiff -comparison branch   # jump straight into a comparison
 godiff -base develop        # override the base branch for this run
 godiff -print-config        # show effective comparisons and exclusions
@@ -26,7 +27,8 @@ godiff -print-config        # show effective comparisons and exclusions
 
 Built-in choices: working tree, staged changes, branch against the configured
 base (`master` by default), the current commit, and **Show commit**. Show commit
-lists the history reachable from `HEAD`; opening one reviews only that commit.
+lists the history reachable from `HEAD`, marks the configured base branch with
+`◆`, and opening one reviews only that commit.
 
 ### Keys
 
@@ -37,6 +39,7 @@ lists the history reachable from `HEAD`; opening one reviews only that commit.
 | `enter` | open: directory toggles its subclusters, file opens its diff, root opens the full diff |
 | `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
 | `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc` cancels |
+| `space` | anchor or clear a commit range in Show commit |
 | `r` | refresh changed paths (keeps selection and expansion) |
 | `esc`/`b` | back to the comparison selector |
 | `?` | toggle full key help |
@@ -47,7 +50,9 @@ subjects, and `ctrl-v` starts a search with the clipboard contents. While
 searching, ordinary keys edit the query, arrows choose a result, `esc` returns
 to navigation, and `enter` opens the selected commit. A full or abbreviated SHA
 can select a commit outside the current `HEAD` history. Returning from a
-commit's file tree restores the same selection.
+commit's file tree restores the same selection. Press `space` to anchor a range,
+move to its other endpoint, and press `enter` to review the selected commits as
+one inclusive diff; press `space` again to clear the range.
 
 ## Configuration
 

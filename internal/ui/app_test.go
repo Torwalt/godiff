@@ -22,6 +22,7 @@ func testModel() Model {
 		&gitx.Repo{Root: "/tmp/repo"},
 		comparisons,
 		[]string{":(exclude)vendor"},
+		"master",
 		"",
 	)
 }
@@ -70,6 +71,64 @@ func TestLogSelectionBuildsShowComparison(t *testing.T) {
 	}
 }
 
+func TestLogRangeBuildsInclusiveDiffComparison(t *testing.T) {
+	m := testModel()
+	m.screen = screenLog
+	m.logCommits = []gitx.Commit{
+		{SHA: "full-newest", ShortSHA: "newest", Subject: "newest subject"},
+		{SHA: "full-middle", ShortSHA: "middle", Subject: "middle subject"},
+		{SHA: "full-oldest", ShortSHA: "oldest", Subject: "oldest subject"},
+	}
+	m.logAnchor = 0
+	m.logCursor = 2
+
+	cmp := m.logComparison()
+	if cmp.Kind != gitx.KindDiff {
+		t.Fatalf("kind = %v, want diff", cmp.Kind)
+	}
+	wantArgs := []string{"full-oldest^", "full-newest"}
+	if !reflect.DeepEqual(cmp.Args, wantArgs) {
+		t.Errorf("args = %v, want %v", cmp.Args, wantArgs)
+	}
+	if cmp.Label != "oldest…newest (3 commits)" {
+		t.Errorf("label = %q", cmp.Label)
+	}
+	if !reflect.DeepEqual(cmp.Exclude, []string{":(exclude)vendor"}) {
+		t.Errorf("exclude = %v", cmp.Exclude)
+	}
+
+	m.logAnchor, m.logCursor = 2, 0
+	if got := m.logComparison().Args; !reflect.DeepEqual(got, wantArgs) {
+		t.Errorf("reverse selection args = %v, want %v", got, wantArgs)
+	}
+}
+
+func TestLogRangeAndBaseMarkers(t *testing.T) {
+	m := testModel()
+	m.screen = screenLog
+	m.logCommits = []gitx.Commit{
+		{SHA: "new", ShortSHA: "1111111", Subject: "new"},
+		{SHA: "middle", ShortSHA: "2222222", Subject: "middle"},
+		{SHA: "base", ShortSHA: "3333333", Subject: "base"},
+	}
+	m.baseSHA = "base"
+
+	model, _ := m.updateLog(runeKey(' '))
+	updated := model.(Model)
+	updated.logCursor = 2
+	view := updated.viewLog()
+	for _, marker := range []string{"┌ start 1111111", "│       2222222", "└ end   3333333", "◆ master"} {
+		if !strings.Contains(view, marker) {
+			t.Errorf("view missing %q:\n%s", marker, view)
+		}
+	}
+
+	model, _ = updated.updateLog(runeKey(' '))
+	if got := model.(Model).logAnchor; got != -1 {
+		t.Errorf("anchor after clearing = %d", got)
+	}
+}
+
 func TestLogPaginationAndReturnFromTree(t *testing.T) {
 	m := testModel()
 	m.screen = screenLog
@@ -108,6 +167,14 @@ func TestCommitPageResultAndError(t *testing.T) {
 	updated = model.(Model)
 	if len(updated.logCommits) != 2 {
 		t.Errorf("stale result replaced commits: %+v", updated.logCommits)
+	}
+
+	m = testModel()
+	m.logRequest = 4
+	model, _ = m.onCommits(commitsMsg{request: 4, commits: commits, baseSHA: "full"})
+	updated = model.(Model)
+	if updated.baseSHA != "full" {
+		t.Errorf("base SHA = %q", updated.baseSHA)
 	}
 
 	m = testModel()

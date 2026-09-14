@@ -28,7 +28,7 @@ func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) 
 
 	query = strings.TrimSpace(query)
 	if isHexObjectID(query) {
-		if commit, ok := r.resolveCommit(query); ok {
+		if commit, err := r.ResolveCommit(query); err == nil {
 			if offset > 0 {
 				return nil, false, nil
 			}
@@ -69,22 +69,36 @@ func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) 
 	return commits, hasNext, nil
 }
 
-func (r *Repo) resolveCommit(id string) (Commit, bool) {
+// ResolveCommit resolves revision to a commit and returns its log metadata.
+func (r *Repo) ResolveCommit(revision string) (Commit, error) {
+	revision = strings.TrimSpace(revision)
+	if revision == "" {
+		return Commit{}, fmt.Errorf("empty revision")
+	}
 	args := []string{
 		"--no-pager", "show", "-s", "-z", "--format=%H%x00%h%x00%s",
-		id + "^{commit}",
+		revision + "^{commit}",
 	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Root
-	out, err := cmd.Output()
-	if err != nil {
-		return Commit{}, false
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := firstLine(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return Commit{}, fmt.Errorf("git resolve %s: %s", revision, msg)
 	}
-	commits, err := ParseLog(out)
+	commits, err := ParseLog(out.Bytes())
 	if err != nil || len(commits) != 1 {
-		return Commit{}, false
+		if err != nil {
+			return Commit{}, err
+		}
+		return Commit{}, fmt.Errorf("git resolve %s: expected one commit, got %d", revision, len(commits))
 	}
-	return commits[0], true
+	return commits[0], nil
 }
 
 func isHexObjectID(s string) bool {
