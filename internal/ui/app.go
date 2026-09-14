@@ -224,7 +224,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenSearch:
 			return m.updateSearch(msg)
 		case screenLoading, screenLogLoading:
-			if msg.String() == "q" || msg.String() == "ctrl+c" {
+			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
 			}
 		}
@@ -346,7 +346,9 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		return m.openSelectorEntry(entries[m.selCursor])
-	case "q", "esc", "ctrl+c":
+	case "q", "esc":
+		return m, nil
+	case "ctrl+c":
 		return m, tea.Quit
 	case "h":
 		for i, entry := range entries {
@@ -422,7 +424,7 @@ func (m Model) startLog() (tea.Model, tea.Cmd) {
 func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.logMode == logSearch {
 		switch msg.String() {
-		case "esc":
+		case "esc", "q":
 			m.logMode = logNavigate
 			m.logInput.Blur()
 			return m, nil
@@ -471,7 +473,7 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.logMode = logSearch
 		m.logInput.Focus()
 		return m.updateLogInput(msg)
-	case "esc":
+	case "esc", "q":
 		if m.logInput.Value() != "" {
 			m.logInput.Reset()
 			return m.reloadLog()
@@ -479,7 +481,7 @@ func (m Model) updateLog(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.leaveLog()
 	case "b":
 		return m.leaveLog()
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
 	}
 	return m.maybeLoadMore()
@@ -667,7 +669,7 @@ func (m Model) startSearch() (tea.Model, tea.Cmd) {
 
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+c":
+	case "esc", "q", "ctrl+c":
 		m.screen = screenTree
 		return m, nil
 	case "up", "ctrl+p", "ctrl+k":
@@ -797,7 +799,7 @@ func (m Model) viewSearch() string {
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(statusStyle.Render("enter jump · ↑/↓ move · esc cancel"))
+	b.WriteString(statusStyle.Render("enter jump · ↑/↓ move · esc/q cancel"))
 	return b.String()
 }
 
@@ -824,7 +826,7 @@ func (m Model) viewSelector() string {
 	if m.status != "" {
 		b.WriteString(m.status + "\n")
 	}
-	b.WriteString(statusStyle.Render("enter open · ↑/↓ move · q quit"))
+	b.WriteString(statusStyle.Render("enter open · ↑/↓ move · ctrl+c quit"))
 	return b.String()
 }
 
@@ -866,13 +868,13 @@ func (m Model) viewLog() string {
 		b.WriteString(m.status + "\n")
 	}
 	if m.logMode == logSearch {
-		b.WriteString(statusStyle.Render("enter open · ↑/↓ choose · esc navigate · ctrl-v paste"))
+		b.WriteString(statusStyle.Render("enter open · ↑/↓ choose · esc/q navigate · ctrl-v paste"))
 	} else if m.logInput.Value() != "" {
-		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / edit · esc clear · b back"))
+		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / edit · esc/q clear · b back"))
 	} else if m.logAnchor >= 0 {
-		b.WriteString(statusStyle.Render("enter open range · space clear · ↑/k ↓/j move · / search · esc back"))
+		b.WriteString(statusStyle.Render("enter open range · space clear · ↑/k ↓/j move · / search · esc/q back"))
 	} else {
-		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / search · ctrl-v paste · esc back"))
+		b.WriteString(statusStyle.Render("enter open · space range · ↑/k ↓/j move · / search · ctrl-v paste · esc/q back"))
 	}
 	return b.String()
 }

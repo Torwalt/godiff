@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Torwalt/godiff/internal/gitx"
+	"github.com/Torwalt/godiff/internal/tree"
 )
 
 func testModel() Model {
@@ -29,6 +30,77 @@ func testModel() Model {
 
 func runeKey(r rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+}
+
+func TestQActsLikeEscape(t *testing.T) {
+	t.Run("selector", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			model, cmd := testModel().updateSelector(msg)
+			if updated := model.(Model); updated.screen != screenSelector || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
+
+	t.Run("loading", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			m := testModel()
+			m.screen = screenLoading
+			model, cmd := m.Update(msg)
+			if updated := model.(Model); updated.screen != screenLoading || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
+
+	t.Run("commit log", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			m := testModel()
+			m.screen = screenLog
+			model, cmd := m.updateLog(msg)
+			if updated := model.(Model); updated.screen != screenSelector || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
+
+	t.Run("commit log search", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			m := testModel()
+			m.screen = screenLog
+			m.logMode = logSearch
+			m.logInput = newLogInput()
+			m.logInput.Focus()
+			model, cmd := m.updateLog(msg)
+			if updated := model.(Model); updated.logMode != logNavigate || cmd != nil {
+				t.Errorf("key %q: mode=%v cmd=%v", msg.String(), updated.logMode, cmd)
+			}
+		}
+	})
+
+	t.Run("tree", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			m := testModel()
+			m.screen = screenTree
+			m.root = tree.Build([]tree.FileEntry{{Path: "file.go", Status: 'M'}})
+			m.rows = m.root.VisibleRows()
+			model, cmd := m.updateTree(msg)
+			if updated := model.(Model); updated.screen != screenSelector || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
+
+	t.Run("search", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
+			m := testModel()
+			m.screen = screenSearch
+			model, cmd := m.updateSearch(msg)
+			if updated := model.(Model); updated.screen != screenTree || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
 }
 
 func TestSelectorIncludesShowCommitAsFifthEntry(t *testing.T) {

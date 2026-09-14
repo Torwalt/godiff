@@ -25,8 +25,8 @@ var keys = keyMap{
 	Diff:     key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "diff")),
 	Search:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search dirs")),
 	Refresh:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Back:     key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc/b", "comparisons")),
-	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Back:     key.NewBinding(key.WithKeys("esc", "q", "b"), key.WithHelp("esc/q/b", "back")),
+	Quit:     key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 

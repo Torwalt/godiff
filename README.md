@@ -38,16 +38,16 @@ lists the history reachable from `HEAD`, marks the configured base branch with
 | `→/l` / `←/h` | expand / collapse directory |
 | `enter` | open: directory toggles its subclusters, file opens its diff, root opens the full diff |
 | `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
-| `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc` cancels |
+| `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc`/`q` cancels |
 | `space` | anchor or clear a commit range in Show commit |
 | `r` | refresh changed paths (keeps selection and expansion) |
-| `esc`/`b` | back to the comparison selector |
+| `esc`/`q`/`b` | back one screen |
 | `?` | toggle full key help |
-| `q` | quit |
+| `ctrl+c` | quit |
 
 In Show commit, `↑/k` and `↓/j` scroll through commits, `/` searches commit
 subjects, and `ctrl-v` starts a search with the clipboard contents. While
-searching, ordinary keys edit the query, arrows choose a result, `esc` returns
+searching, ordinary keys edit the query, arrows choose a result, `esc`/`q` returns
 to navigation, and `enter` opens the selected commit. A full or abbreviated SHA
 can select a commit outside the current `HEAD` history. Returning from a
 commit's file tree restores the same selection. Press `space` to anchor a range,
