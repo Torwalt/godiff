@@ -739,6 +739,10 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case parent != nil && parent.Kind != tree.KindRoot:
 			m.cursor = m.rowIndex(parent)
 		}
+	case key.Matches(msg, keys.CollapseAll):
+		m.root.CollapseAll()
+		m.rows = m.root.VisibleRows()
+		m.cursor = 0
 	case key.Matches(msg, keys.Open):
 		r := m.rows[m.cursor]
 		if r.Node.Kind == tree.KindDir {

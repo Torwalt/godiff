@@ -103,6 +103,29 @@ func TestQActsLikeEscape(t *testing.T) {
 	})
 }
 
+func TestCollapseAllResetsTree(t *testing.T) {
+	m := testModel()
+	m.screen = screenTree
+	m.height = 6
+	m.root = tree.Build([]tree.FileEntry{
+		{Path: "db/queries/q.sql", Status: 'M'},
+		{Path: "db/migrations/m.sql", Status: 'M'},
+		{Path: "internal/app/x.go", Status: 'M'},
+	})
+	fresh := len(m.root.VisibleRows())
+	tree.ExpandTo(m.root.Find("db/queries/q.sql"))
+	tree.ExpandTo(m.root.Find("internal/app/x.go"))
+	m.rows = m.root.VisibleRows()
+	m.cursor = len(m.rows) - 1
+	m.clampScroll()
+
+	model, cmd := m.updateTree(runeKey('H'))
+	updated := model.(Model)
+	if len(updated.rows) != fresh || updated.cursor != 0 || updated.offset != 0 || cmd != nil {
+		t.Errorf("rows=%d want %d, cursor=%d offset=%d cmd=%v", len(updated.rows), fresh, updated.cursor, updated.offset, cmd)
+	}
+}
+
 func TestSelectorIncludesPickers(t *testing.T) {
 	m := testModel()
 	entries := m.selectorEntries()

@@ -39,6 +39,7 @@ lists the history reachable from `HEAD`, marks the configured base branch with
 | --- | --- |
 | `↑/k` `↓/j` | move selection |
 | `→/l` / `←/h` | expand / collapse directory |
+| `H` | collapse all directories and return to the top |
 | `enter` | open: directory toggles its subclusters, file opens its diff, root opens the full diff |
 | `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
 | `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc`/`q` cancels |

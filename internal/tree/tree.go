@@ -261,6 +261,17 @@ func (n *Node) RestoreExpanded(paths map[string]bool) {
 	walk(n)
 }
 
+// CollapseAll closes every directory below n, back to the state Build
+// returns.
+func (n *Node) CollapseAll() {
+	if n.Kind == KindDir {
+		n.Expanded = false
+	}
+	for _, c := range n.Children {
+		c.CollapseAll()
+	}
+}
+
 // Dirs returns the addressable directory nodes in depth-first order: one
 // per possible row, so folded chains contribute only their last node. Its
 // path still carries every folded segment, so matching on any of them works.

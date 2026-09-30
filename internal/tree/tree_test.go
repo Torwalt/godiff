@@ -226,6 +226,23 @@ func TestExpandedPathsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCollapseAll(t *testing.T) {
+	root := Build(entries("db/queries/q.sql", "db/migrations/m.sql", "a/b/c/x.go", "top.txt"))
+	want := outline(root)
+	expandAll(root)
+
+	root.CollapseAll()
+	if got := outline(root); got != want {
+		t.Errorf("outline:\n%s\nwant:\n%s", got, want)
+	}
+	if !root.Expanded {
+		t.Error("root collapsed")
+	}
+	if paths := root.ExpandedPaths(); len(paths) != 0 {
+		t.Errorf("still expanded: %v", paths)
+	}
+}
+
 func TestExpandTo(t *testing.T) {
 	root := Build(entries("a/b/c/d.txt"))
 	n := root.Find("a/b/c/d.txt")
