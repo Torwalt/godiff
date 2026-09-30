@@ -27,6 +27,7 @@ const (
 	screenLoading
 	screenTree
 	screenSearch
+	screenBranches
 )
 
 const (
@@ -53,7 +54,10 @@ var selectorShortcuts = map[string]string{
 type selectorEntry struct {
 	comparison int
 	showCommit bool
+	pickBranch bool
 }
+
+func (e selectorEntry) builtin() bool { return e.showCommit || e.pickBranch }
 
 type commitsMsg struct {
 	request uint64
@@ -69,6 +73,11 @@ type discoveredMsg struct {
 	files   []gitx.ChangedFile
 	err     error
 	refresh bool
+}
+
+type branchesMsg struct {
+	branches []string
+	err      error
 }
 
 type diffDoneMsg struct{ err error }
@@ -87,17 +96,27 @@ type Model struct {
 	selCursor int
 
 	// commit log state
-	logCommits     []gitx.Commit
-	logCursor      int
-	logOffset      int
-	logHasNext     bool
-	logLoading     bool
-	logMode        logMode
-	logInput       textinput.Model
-	logRequest     uint64
-	logAnchor      int
-	baseSHA        string
-	fromCommitTree bool
+	logCommits []gitx.Commit
+	logCursor  int
+	logOffset  int
+	logHasNext bool
+	logLoading bool
+	logMode    logMode
+	logInput   textinput.Model
+	logRequest uint64
+	logAnchor  int
+	baseSHA    string
+
+	// branch picker state
+	branches      []string
+	branchLoading bool
+	branchInput   textinput.Model
+	branchMatches []string
+	branchCursor  int
+
+	// treeBack is the screen the tree returns to: the selector or the
+	// picker the comparison was chosen from.
+	treeBack screen
 
 	// tree state
 	active *gitx.Comparison
@@ -133,7 +152,7 @@ func New(repo *gitx.Repo, comparisons []gitx.Comparison, exclude []string, baseB
 	}
 	if startID != "" {
 		for i, entry := range m.selectorEntries() {
-			if !entry.showCommit && comparisons[entry.comparison].ID == startID {
+			if !entry.builtin() && comparisons[entry.comparison].ID == startID {
 				m.selCursor = i
 				m.screen = screenLoading
 				m.active = &m.comparisons[entry.comparison]
@@ -194,7 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading {
+		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading && !m.branchLoading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -206,6 +225,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commitsMsg:
 		return m.onCommits(msg)
+
+	case branchesMsg:
+		return m.onBranches(msg)
 
 	case diffDoneMsg:
 		if msg.err != nil {
@@ -223,6 +245,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTree(msg)
 		case screenSearch:
 			return m.updateSearch(msg)
+		case screenBranches:
+			return m.updateBranches(msg)
 		case screenLoading, screenLogLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -236,6 +260,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.screen == screenSearch {
 		var cmd tea.Cmd
 		m.searchInput, cmd = m.searchInput.Update(msg)
+		return m, cmd
+	}
+	if m.screen == screenBranches {
+		var cmd tea.Cmd
+		m.branchInput, cmd = m.branchInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -279,8 +308,8 @@ func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
 func (m Model) onDiscovered(msg discoveredMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.status = errorStyle.Render(msg.err.Error())
-		if m.fromCommitTree && !msg.refresh {
-			m.screen = screenLog
+		if m.treeBack != screenSelector && !msg.refresh {
+			m.screen = m.treeBack
 		} else if m.root == nil {
 			m.screen = screenSelector // discovery never succeeded: go back
 		} else {
@@ -357,9 +386,16 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.startLog()
 			}
 		}
+	case "b":
+		for i, entry := range entries {
+			if entry.pickBranch {
+				m.selCursor = i
+				return m.startBranches()
+			}
+		}
 	default:
 		for i, entry := range entries {
-			if entry.showCommit {
+			if entry.builtin() {
 				continue
 			}
 			c := m.comparisons[entry.comparison]
@@ -367,21 +403,28 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			m.selCursor = i
-			return m.startComparison(c, false)
+			return m.startComparison(c, screenSelector)
 		}
 	}
 	return m, nil
 }
 
 func (m Model) selectorEntries() []selectorEntry {
-	entries := make([]selectorEntry, 0, len(m.comparisons)+1)
-	insertedShow := false
+	entries := make([]selectorEntry, 0, len(m.comparisons)+2)
+	insertedShow, insertedPick := false, false
 	for i, c := range m.comparisons {
 		entries = append(entries, selectorEntry{comparison: i})
+		if c.ID == "branch" {
+			entries = append(entries, selectorEntry{pickBranch: true})
+			insertedPick = true
+		}
 		if c.ID == "commit" {
 			entries = append(entries, selectorEntry{showCommit: true})
 			insertedShow = true
 		}
+	}
+	if !insertedPick {
+		entries = append(entries, selectorEntry{pickBranch: true})
 	}
 	if !insertedShow {
 		entries = append(entries, selectorEntry{showCommit: true})
@@ -390,15 +433,18 @@ func (m Model) selectorEntries() []selectorEntry {
 }
 
 func (m Model) openSelectorEntry(entry selectorEntry) (tea.Model, tea.Cmd) {
-	if entry.showCommit {
+	switch {
+	case entry.showCommit:
 		return m.startLog()
+	case entry.pickBranch:
+		return m.startBranches()
 	}
-	return m.startComparison(m.comparisons[entry.comparison], false)
+	return m.startComparison(m.comparisons[entry.comparison], screenSelector)
 }
 
-func (m Model) startComparison(cmp gitx.Comparison, fromCommit bool) (tea.Model, tea.Cmd) {
+func (m Model) startComparison(cmp gitx.Comparison, back screen) (tea.Model, tea.Cmd) {
 	m.active = &cmp
-	m.fromCommitTree = fromCommit
+	m.treeBack = back
 	m.screen = screenLoading
 	m.status = ""
 	return m, tea.Batch(m.spin.Tick, m.discover(cmp, false))
@@ -415,7 +461,7 @@ func (m Model) startLog() (tea.Model, tea.Cmd) {
 	m.logAnchor = -1
 	m.baseSHA = ""
 	m.logRequest++
-	m.fromCommitTree = false
+	m.treeBack = screenSelector
 	m.screen = screenLogLoading
 	m.status = ""
 	return m, tea.Batch(m.spin.Tick, m.loadLogPage("", 0, false, m.logRequest))
@@ -548,7 +594,7 @@ func (m Model) openLogCommit() (tea.Model, tea.Cmd) {
 	m.logRequest++
 	m.logLoading = false
 	cmp := m.logComparison()
-	return m.startComparison(cmp, true)
+	return m.startComparison(cmp, screenLog)
 }
 
 func (m Model) logComparison() gitx.Comparison {
@@ -587,6 +633,82 @@ func (m Model) leaveLog() (tea.Model, tea.Cmd) {
 	m.screen = screenSelector
 	m.status = ""
 	return m, nil
+}
+
+func (m Model) startBranches() (tea.Model, tea.Cmd) {
+	m.branches = nil
+	m.branchMatches = nil
+	m.branchCursor = 0
+	m.branchLoading = true
+	m.branchInput = textinput.New()
+	m.branchInput.Prompt = "/ "
+	m.branchInput.Focus()
+	m.screen = screenBranches
+	m.status = ""
+	repo := m.repo
+	return m, tea.Batch(m.spin.Tick, textinput.Blink, func() tea.Msg {
+		branches, err := repo.Branches()
+		return branchesMsg{branches: branches, err: err}
+	})
+}
+
+func (m Model) onBranches(msg branchesMsg) (tea.Model, tea.Cmd) {
+	if !m.branchLoading {
+		return m, nil
+	}
+	m.branchLoading = false
+	if msg.err != nil {
+		m.status = errorStyle.Render(msg.err.Error())
+		if m.screen == screenBranches {
+			m.screen = screenSelector
+		}
+		return m, nil
+	}
+	m.branches = msg.branches
+	m.branchMatches = rankBranches(m.branches, m.branchInput.Value())
+	return m, nil
+}
+
+func (m Model) updateBranches(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.branchLoading = false
+		m.screen = screenSelector
+		m.status = ""
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "up", "ctrl+p", "ctrl+k":
+		if m.branchCursor > 0 {
+			m.branchCursor--
+		}
+		return m, nil
+	case "down", "ctrl+n", "ctrl+j":
+		if m.branchCursor < len(m.branchMatches)-1 {
+			m.branchCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.branchCursor >= len(m.branchMatches) {
+			return m, nil
+		}
+		return m.startComparison(m.branchComparison(m.branchMatches[m.branchCursor]), screenBranches)
+	}
+	var cmd tea.Cmd
+	m.branchInput, cmd = m.branchInput.Update(msg)
+	m.branchMatches = rankBranches(m.branches, m.branchInput.Value())
+	m.branchCursor = min(m.branchCursor, max(len(m.branchMatches)-1, 0))
+	return m, cmd
+}
+
+func (m Model) branchComparison(branch string) gitx.Comparison {
+	return gitx.Comparison{
+		ID:      "branch:" + branch,
+		Label:   "Branch against " + branch,
+		Kind:    gitx.KindDiff,
+		Args:    []string{branch + "...HEAD"},
+		Exclude: append([]string(nil), m.exclude...),
+	}
 }
 
 func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -633,11 +755,7 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenLoading
 		return m, tea.Batch(m.spin.Tick, m.discover(*m.active, true))
 	case key.Matches(msg, keys.Back):
-		if m.fromCommitTree {
-			m.screen = screenLog
-		} else {
-			m.screen = screenSelector
-		}
+		m.screen = m.treeBack
 		m.status = ""
 	case key.Matches(msg, keys.Quit):
 		return m, tea.Quit
@@ -768,6 +886,8 @@ func (m Model) View() string {
 		return m.viewTree()
 	case screenSearch:
 		return m.viewSearch()
+	case screenBranches:
+		return m.viewBranches()
 	}
 	return ""
 }
@@ -803,13 +923,43 @@ func (m Model) viewSearch() string {
 	return b.String()
 }
 
+func (m Model) viewBranches() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("godiff — branch against"))
+	b.WriteString("\n")
+	b.WriteString(m.branchInput.View())
+	b.WriteString("\n\n")
+
+	switch {
+	case m.branchLoading:
+		b.WriteString("  " + m.spin.View() + " loading branches…\n")
+	case len(m.branchMatches) == 0:
+		b.WriteString("  no matching branches\n")
+	}
+	visible := max(m.height-5, 1)
+	offset := max(m.branchCursor-visible+1, 0)
+	end := min(offset+visible, len(m.branchMatches))
+	for i := offset; i < end; i++ {
+		line := "  " + m.branchMatches[i]
+		if i == m.branchCursor {
+			line = selectedStyle.Render("> " + m.branchMatches[i])
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(statusStyle.Render("enter open · ↑/↓ move · esc/q back"))
+	return b.String()
+}
+
 func (m Model) viewSelector() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("godiff — select comparison"))
 	b.WriteString("\n\n")
 	for i, entry := range m.selectorEntries() {
 		label := "Show commit (h)"
-		if !entry.showCommit {
+		if entry.pickBranch {
+			label = "Branch against… (b)"
+		} else if !entry.showCommit {
 			c := m.comparisons[entry.comparison]
 			label = c.Label
 			if k, ok := selectorShortcuts[c.ID]; ok {

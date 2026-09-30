@@ -103,20 +103,74 @@ func TestQActsLikeEscape(t *testing.T) {
 	})
 }
 
-func TestSelectorIncludesShowCommitAsFifthEntry(t *testing.T) {
+func TestSelectorIncludesPickers(t *testing.T) {
 	m := testModel()
 	entries := m.selectorEntries()
-	if len(entries) != 5 || !entries[4].showCommit {
-		t.Fatalf("entries = %+v, want Show commit fifth", entries)
+	if len(entries) != 6 || !entries[3].pickBranch || !entries[5].showCommit {
+		t.Fatalf("entries = %+v, want branch picker fourth and Show commit sixth", entries)
 	}
-	if view := m.viewSelector(); !strings.Contains(view, "Show commit (h)") {
-		t.Errorf("selector missing Show commit:\n%s", view)
+	view := m.viewSelector()
+	for _, label := range []string{"Branch against… (b)", "Show commit (h)"} {
+		if !strings.Contains(view, label) {
+			t.Errorf("selector missing %q:\n%s", label, view)
+		}
 	}
 
 	model, cmd := m.updateSelector(runeKey('h'))
 	updated := model.(Model)
-	if updated.screen != screenLogLoading || updated.selCursor != 4 || cmd == nil {
+	if updated.screen != screenLogLoading || updated.selCursor != 5 || cmd == nil {
 		t.Errorf("after h: screen=%v cursor=%d cmd=%v", updated.screen, updated.selCursor, cmd)
+	}
+
+	model, cmd = m.updateSelector(runeKey('b'))
+	updated = model.(Model)
+	if updated.screen != screenBranches || !updated.branchLoading || updated.selCursor != 3 || cmd == nil {
+		t.Errorf("after b: screen=%v loading=%v cursor=%d cmd=%v", updated.screen, updated.branchLoading, updated.selCursor, cmd)
+	}
+}
+
+func TestBranchPickerFiltersAndOpensThreeDotDiff(t *testing.T) {
+	model, _ := testModel().updateSelector(runeKey('b'))
+	model, _ = model.(Model).onBranches(branchesMsg{branches: []string{"sco-961/salary-2-0", "master", "sco-935/recurring-read"}})
+	m := model.(Model)
+	if m.branchLoading || len(m.branchMatches) != 3 {
+		t.Fatalf("loaded: loading=%v matches=%v", m.branchLoading, m.branchMatches)
+	}
+
+	for _, r := range "salary" {
+		model, _ = m.updateBranches(runeKey(r))
+		m = model.(Model)
+	}
+	if !reflect.DeepEqual(m.branchMatches, []string{"sco-961/salary-2-0"}) {
+		t.Fatalf("matches = %v", m.branchMatches)
+	}
+
+	model, cmd := m.updateBranches(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(Model)
+	if m.screen != screenLoading || m.treeBack != screenBranches || cmd == nil {
+		t.Fatalf("open: screen=%v back=%v cmd=%v", m.screen, m.treeBack, cmd)
+	}
+	if !reflect.DeepEqual(m.active.Args, []string{"sco-961/salary-2-0...HEAD"}) || m.active.Kind != gitx.KindDiff {
+		t.Errorf("active = %+v", *m.active)
+	}
+	if !reflect.DeepEqual(m.active.Exclude, []string{":(exclude)vendor"}) {
+		t.Errorf("exclude = %v", m.active.Exclude)
+	}
+
+	m.screen = screenTree
+	model, _ = m.updateTree(runeKey('b'))
+	m = model.(Model)
+	if m.screen != screenBranches || m.branchInput.Value() != "salary" {
+		t.Errorf("back: screen=%v query=%q", m.screen, m.branchInput.Value())
+	}
+}
+
+func TestBranchPickerError(t *testing.T) {
+	model, _ := testModel().updateSelector(runeKey('b'))
+	model, _ = model.(Model).onBranches(branchesMsg{err: errors.New("bad refs")})
+	m := model.(Model)
+	if m.screen != screenSelector || !strings.Contains(m.status, "bad refs") {
+		t.Errorf("error: screen=%v status=%q", m.screen, m.status)
 	}
 }
 
@@ -131,8 +185,8 @@ func TestLogSelectionBuildsShowComparison(t *testing.T) {
 
 	model, cmd := m.updateLog(tea.KeyMsg{Type: tea.KeyEnter})
 	updated := model.(Model)
-	if updated.screen != screenLoading || !updated.fromCommitTree || cmd == nil {
-		t.Fatalf("screen=%v fromCommit=%v cmd=%v", updated.screen, updated.fromCommitTree, cmd)
+	if updated.screen != screenLoading || updated.treeBack != screenLog || cmd == nil {
+		t.Fatalf("screen=%v back=%v cmd=%v", updated.screen, updated.treeBack, cmd)
 	}
 	wantArgs := []string{"full-two"}
 	if updated.active.Kind != gitx.KindShow || !reflect.DeepEqual(updated.active.Args, wantArgs) {
@@ -215,7 +269,7 @@ func TestLogPaginationAndReturnFromTree(t *testing.T) {
 	}
 
 	m.screen = screenTree
-	m.fromCommitTree = true
+	m.treeBack = screenLog
 	m.root = nil
 	model, _ = m.updateTree(runeKey('b'))
 	updated = model.(Model)

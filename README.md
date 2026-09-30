@@ -26,7 +26,10 @@ godiff -print-config        # show effective comparisons and exclusions
 ```
 
 Built-in choices: working tree, staged changes, branch against the configured
-base (`master` by default), the current commit, and **Show commit**. Show commit
+base (`master` by default), **Branch against…**, the current commit, and
+**Show commit**. Branch against… (`b`) lists local branches, most recently
+committed first; type to fuzzy-filter, and `enter` diffs `<branch>...HEAD`,
+which reviews a stacked branch against the branch it was cut from. Show commit
 lists the history reachable from `HEAD`, marks the configured base branch with
 `◆`, and opening one reviews only that commit.
 

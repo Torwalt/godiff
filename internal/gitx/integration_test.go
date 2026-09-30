@@ -286,3 +286,17 @@ func TestDiscoverInclusiveCommitRange(t *testing.T) {
 		t.Errorf("range files = %+v", files)
 	}
 }
+
+func TestBranchesSkipsCurrent(t *testing.T) {
+	repo := testRepo(t)
+	git(t, repo.Root, "branch", "feature/a")
+	git(t, repo.Root, "switch", "-c", "stacked")
+
+	got, err := repo.Branches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] == "stacked" || got[1] == "stacked" {
+		t.Errorf("branches = %v, want feature/a and master", got)
+	}
+}

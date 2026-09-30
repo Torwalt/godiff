@@ -41,25 +41,36 @@ func fuzzyMatch(query, path string) (int, bool) {
 // rankDirs filters dirs by fuzzy-matching query against their paths and
 // returns them best-first; ties break lexicographically.
 func rankDirs(dirs []*tree.Node, query string) []*tree.Node {
+	return rank(dirs, func(d *tree.Node) string { return d.Path }, query)
+}
+
+// rankBranches is rankDirs for branch names.
+func rankBranches(branches []string, query string) []string {
+	return rank(branches, func(b string) string { return b }, query)
+}
+
+func rank[T any](items []T, text func(T) string, query string) []T {
 	type scored struct {
-		node  *tree.Node
+		item  T
+		text  string
 		score int
 	}
 	var matches []scored
-	for _, d := range dirs {
-		if s, ok := fuzzyMatch(query, d.Path); ok {
-			matches = append(matches, scored{d, s})
+	for _, it := range items {
+		t := text(it)
+		if s, ok := fuzzyMatch(query, t); ok {
+			matches = append(matches, scored{it, t, s})
 		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].score != matches[j].score {
 			return matches[i].score < matches[j].score
 		}
-		return matches[i].node.Path < matches[j].node.Path
+		return matches[i].text < matches[j].text
 	})
-	out := make([]*tree.Node, len(matches))
+	out := make([]T, len(matches))
 	for i, m := range matches {
-		out[i] = m.node
+		out[i] = m.item
 	}
 	return out
 }
