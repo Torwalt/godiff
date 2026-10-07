@@ -17,6 +17,7 @@ var (
 		'D': lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 		'R': lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		'C': lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		'?': lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
 	}
 )
 

@@ -46,9 +46,14 @@ func run() error {
 		return err
 	}
 
+	mainRoot := ""
+	if worktrees, err := repo.Worktrees(); err == nil && len(worktrees) > 0 {
+		mainRoot = worktrees[0].Path
+	}
 	cfg, err := config.Load(repo.Root, config.Options{
 		BaseBranch:   *base,
 		NoRepoConfig: *noRepoConfig,
+		MainRoot:     mainRoot,
 	})
 	if err != nil {
 		return err
@@ -112,6 +117,9 @@ func printEffectiveConfig(repo *gitx.Repo, cfg *config.Config) {
 		fmt.Printf("  %-12s %-30s git %s %s\n", c.ID, c.Label, kind, strings.Join(c.Args, " "))
 		for _, e := range c.Exclude {
 			fmt.Printf("  %-12s   exclude %s\n", "", e)
+		}
+		if c.Untracked {
+			fmt.Printf("  %-12s   + untracked files\n", "")
 		}
 	}
 }

@@ -111,7 +111,11 @@ func TestDisplayCmdArgs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := repo.DisplayCmd(tt.cmp, tt.pathspec)
+			cmd, cleanup, err := repo.DisplayCmd(tt.cmp, tt.pathspec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cleanup()
 			if !reflect.DeepEqual(cmd.Args, tt.want) {
 				t.Errorf("args = %v, want %v", cmd.Args, tt.want)
 			}

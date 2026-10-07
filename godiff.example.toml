@@ -16,14 +16,21 @@ exclude = [
 ]
 
 # Add a new comparison, or override a built-in by reusing its id
-# (built-ins: worktree, staged, branch, commit). "Show commit" is a dynamic
-# UI choice rather than a configurable comparison.
+# (built-ins: worktree, staged, branch, all, commit). "Show commit",
+# "Branch against…" and "Worktree…" are dynamic UI choices rather than
+# configurable comparisons.
 [[comparisons]]
 id = "last"
 label = "Last commit range"
 kind = "diff"              # "diff" (default) or "show"
 args = ["HEAD~1..HEAD"]
 exclude = ["mocks"]        # per-comparison, appended to the shared excludes
+
+[[comparisons]]
+id = "head"
+label = "HEAD to working tree"
+args = ["HEAD"]
+untracked = true           # list untracked files as added; working-tree diffs only
 
 [[comparisons]]
 id = "review"

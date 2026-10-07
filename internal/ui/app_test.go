@@ -17,6 +17,7 @@ func testModel() Model {
 		{ID: "worktree", Label: "Working tree"},
 		{ID: "staged", Label: "Staged changes"},
 		{ID: "branch", Label: "Branch against master"},
+		{ID: "all", Label: "All changes since master", Args: []string{"--merge-base", "master"}, Untracked: true},
 		{ID: "commit", Label: "Current commit", Kind: gitx.KindShow},
 	}
 	return New(
@@ -129,11 +130,11 @@ func TestCollapseAllResetsTree(t *testing.T) {
 func TestSelectorIncludesPickers(t *testing.T) {
 	m := testModel()
 	entries := m.selectorEntries()
-	if len(entries) != 6 || !entries[3].pickBranch || !entries[5].showCommit {
-		t.Fatalf("entries = %+v, want branch picker fourth and Show commit sixth", entries)
+	if len(entries) != 8 || !entries[3].pickBranch || !entries[6].showCommit || !entries[7].pickWorktree {
+		t.Fatalf("entries = %+v, want branch picker fourth, Show commit seventh and worktree picker last", entries)
 	}
 	view := m.viewSelector()
-	for _, label := range []string{"Branch against… (b)", "Show commit (h)"} {
+	for _, label := range []string{"Branch against… (b)", "All changes since master (a)", "Show commit (h)", "Worktree… (t)"} {
 		if !strings.Contains(view, label) {
 			t.Errorf("selector missing %q:\n%s", label, view)
 		}
@@ -141,7 +142,7 @@ func TestSelectorIncludesPickers(t *testing.T) {
 
 	model, cmd := m.updateSelector(runeKey('h'))
 	updated := model.(Model)
-	if updated.screen != screenLogLoading || updated.selCursor != 5 || cmd == nil {
+	if updated.screen != screenLogLoading || updated.selCursor != 6 || cmd == nil {
 		t.Errorf("after h: screen=%v cursor=%d cmd=%v", updated.screen, updated.selCursor, cmd)
 	}
 
@@ -149,6 +150,70 @@ func TestSelectorIncludesPickers(t *testing.T) {
 	updated = model.(Model)
 	if updated.screen != screenBranches || !updated.branchLoading || updated.selCursor != 3 || cmd == nil {
 		t.Errorf("after b: screen=%v loading=%v cursor=%d cmd=%v", updated.screen, updated.branchLoading, updated.selCursor, cmd)
+	}
+
+	model, cmd = m.updateSelector(runeKey('t'))
+	updated = model.(Model)
+	if updated.screen != screenWorktrees || !updated.worktreeLoading || updated.selCursor != 7 || cmd == nil {
+		t.Errorf("after t: screen=%v loading=%v cursor=%d cmd=%v", updated.screen, updated.worktreeLoading, updated.selCursor, cmd)
+	}
+}
+
+func TestWorktreePickerOpensAllChangesInChosenCheckout(t *testing.T) {
+	model, _ := testModel().updateSelector(runeKey('t'))
+	model, _ = model.(Model).onWorktrees(worktreesMsg{items: []worktreeItem{
+		{Worktree: gitx.Worktree{Path: "/tmp/repo", Branch: "master"}, name: "master", path: "/tmp/repo", progress: "clean"},
+		{Worktree: gitx.Worktree{Path: "/tmp/repo/.claude/worktrees/sco-946", Branch: "sco-946-wt"}, name: "sco-946-wt", path: ".claude/worktrees/sco-946", progress: "5 ahead · 7 changed"},
+		{Worktree: gitx.Worktree{Path: "/tmp/scratch/base", Head: "790b75a938b5"}, name: "detached 790b75a", path: "/tmp/scratch/base", progress: "2 changed"},
+	}})
+	m := model.(Model)
+	if m.worktreeLoading || len(m.worktreeMatches) != 3 {
+		t.Fatalf("loaded: loading=%v matches=%d", m.worktreeLoading, len(m.worktreeMatches))
+	}
+	view := m.viewWorktrees()
+	for _, want := range []string{"● master", "5 ahead · 7 changed", ".claude/worktrees/sco-946", "detached 790b75a"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker missing %q:\n%s", want, view)
+		}
+	}
+
+	for _, r := range "946" {
+		model, _ = m.updateWorktrees(runeKey(r))
+		m = model.(Model)
+	}
+	if len(m.worktreeMatches) != 1 || m.worktreeMatches[0].name != "sco-946-wt" {
+		t.Fatalf("matches = %+v", m.worktreeMatches)
+	}
+
+	model, cmd := m.updateWorktrees(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(Model)
+	if m.screen != screenLoading || m.treeBack != screenWorktrees || cmd == nil {
+		t.Fatalf("open: screen=%v back=%v cmd=%v", m.screen, m.treeBack, cmd)
+	}
+	if m.repo.Root != "/tmp/repo/.claude/worktrees/sco-946" || m.active.ID != "all" {
+		t.Errorf("repo=%q active=%+v", m.repo.Root, *m.active)
+	}
+	if view := m.View(); !strings.Contains(view, "All changes since master @ sco-946-wt") {
+		t.Errorf("loading view does not name the worktree:\n%s", view)
+	}
+
+	m.screen = screenTree
+	model, _ = m.updateTree(runeKey('b'))
+	m = model.(Model)
+	if m.screen != screenWorktrees || m.worktreeInput.Value() != "946" {
+		t.Errorf("back: screen=%v query=%q", m.screen, m.worktreeInput.Value())
+	}
+	if view := m.viewSelector(); !strings.Contains(view, "select comparison @ sco-946-wt") {
+		t.Errorf("selector does not name the worktree:\n%s", view)
+	}
+}
+
+func TestWorktreePickerError(t *testing.T) {
+	model, _ := testModel().updateSelector(runeKey('t'))
+	model, _ = model.(Model).onWorktrees(worktreesMsg{err: errors.New("no worktrees")})
+	m := model.(Model)
+	if m.screen != screenSelector || !strings.Contains(m.status, "no worktrees") {
+		t.Errorf("error: screen=%v status=%q", m.screen, m.status)
 	}
 }
 

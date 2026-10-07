@@ -28,6 +28,7 @@ const (
 	screenTree
 	screenSearch
 	screenBranches
+	screenWorktrees
 )
 
 const (
@@ -48,16 +49,18 @@ var selectorShortcuts = map[string]string{
 	"worktree": "w",
 	"staged":   "s",
 	"branch":   "m",
+	"all":      "a",
 	"commit":   "c",
 }
 
 type selectorEntry struct {
-	comparison int
-	showCommit bool
-	pickBranch bool
+	comparison   int
+	showCommit   bool
+	pickBranch   bool
+	pickWorktree bool
 }
 
-func (e selectorEntry) builtin() bool { return e.showCommit || e.pickBranch }
+func (e selectorEntry) builtin() bool { return e.showCommit || e.pickBranch || e.pickWorktree }
 
 type commitsMsg struct {
 	request uint64
@@ -113,6 +116,16 @@ type Model struct {
 	branchInput   textinput.Model
 	branchMatches []string
 	branchCursor  int
+
+	// worktree picker state
+	worktrees       []worktreeItem
+	worktreeLoading bool
+	worktreeInput   textinput.Model
+	worktreeMatches []worktreeItem
+	worktreeCursor  int
+	// worktree names the checkout picked in the worktree picker; empty
+	// while godiff still runs in the one it started in.
+	worktree string
 
 	// treeBack is the screen the tree returns to: the selector or the
 	// picker the comparison was chosen from.
@@ -213,7 +226,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading && !m.branchLoading {
+		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading && !m.branchLoading && !m.worktreeLoading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -228,6 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case branchesMsg:
 		return m.onBranches(msg)
+
+	case worktreesMsg:
+		return m.onWorktrees(msg)
 
 	case diffDoneMsg:
 		if msg.err != nil {
@@ -247,6 +263,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		case screenBranches:
 			return m.updateBranches(msg)
+		case screenWorktrees:
+			return m.updateWorktrees(msg)
 		case screenLoading, screenLogLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -265,6 +283,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.screen == screenBranches {
 		var cmd tea.Cmd
 		m.branchInput, cmd = m.branchInput.Update(msg)
+		return m, cmd
+	}
+	if m.screen == screenWorktrees {
+		var cmd tea.Cmd
+		m.worktreeInput, cmd = m.worktreeInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -393,6 +416,13 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.startBranches()
 			}
 		}
+	case "t":
+		for i, entry := range entries {
+			if entry.pickWorktree {
+				m.selCursor = i
+				return m.startWorktrees()
+			}
+		}
 	default:
 		for i, entry := range entries {
 			if entry.builtin() {
@@ -410,7 +440,7 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) selectorEntries() []selectorEntry {
-	entries := make([]selectorEntry, 0, len(m.comparisons)+2)
+	entries := make([]selectorEntry, 0, len(m.comparisons)+3)
 	insertedShow, insertedPick := false, false
 	for i, c := range m.comparisons {
 		entries = append(entries, selectorEntry{comparison: i})
@@ -429,7 +459,7 @@ func (m Model) selectorEntries() []selectorEntry {
 	if !insertedShow {
 		entries = append(entries, selectorEntry{showCommit: true})
 	}
-	return entries
+	return append(entries, selectorEntry{pickWorktree: true})
 }
 
 func (m Model) openSelectorEntry(entry selectorEntry) (tea.Model, tea.Cmd) {
@@ -438,6 +468,8 @@ func (m Model) openSelectorEntry(entry selectorEntry) (tea.Model, tea.Cmd) {
 		return m.startLog()
 	case entry.pickBranch:
 		return m.startBranches()
+	case entry.pickWorktree:
+		return m.startWorktrees()
 	}
 	return m.startComparison(m.comparisons[entry.comparison], screenSelector)
 }
@@ -771,9 +803,14 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openDiff(n *tree.Node) (tea.Model, tea.Cmd) {
-	cmd := m.repo.DisplayCmd(*m.active, n.Path)
+	cmd, cleanup, err := m.repo.DisplayCmd(*m.active, n.Path)
+	if err != nil {
+		m.status = errorStyle.Render(err.Error())
+		return m, nil
+	}
 	m.status = ""
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		cleanup()
 		return diffDoneMsg{err: err}
 	})
 }
@@ -885,6 +922,9 @@ func (m Model) View() string {
 		if m.active != nil {
 			label = m.active.Label
 		}
+		if m.worktree != "" {
+			label += " @ " + m.worktree
+		}
 		return fmt.Sprintf("\n %s loading %s…\n", m.spin.View(), label)
 	case screenTree:
 		return m.viewTree()
@@ -892,13 +932,25 @@ func (m Model) View() string {
 		return m.viewSearch()
 	case screenBranches:
 		return m.viewBranches()
+	case screenWorktrees:
+		return m.viewWorktrees()
 	}
 	return ""
 }
 
+// title renders a screen heading, naming the checkout picked in the
+// worktree picker.
+func (m Model) title(s string) string {
+	t := "godiff — " + s
+	if m.worktree != "" {
+		t += " @ " + m.worktree
+	}
+	return titleStyle.Render(t)
+}
+
 func (m Model) viewSearch() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("godiff — search directories"))
+	b.WriteString(m.title("search directories"))
 	b.WriteString("\n")
 	b.WriteString(m.searchInput.View())
 	b.WriteString("\n\n")
@@ -929,7 +981,7 @@ func (m Model) viewSearch() string {
 
 func (m Model) viewBranches() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("godiff — branch against"))
+	b.WriteString(m.title("branch against"))
 	b.WriteString("\n")
 	b.WriteString(m.branchInput.View())
 	b.WriteString("\n\n")
@@ -957,12 +1009,14 @@ func (m Model) viewBranches() string {
 
 func (m Model) viewSelector() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("godiff — select comparison"))
+	b.WriteString(m.title("select comparison"))
 	b.WriteString("\n\n")
 	for i, entry := range m.selectorEntries() {
 		label := "Show commit (h)"
 		if entry.pickBranch {
 			label = "Branch against… (b)"
+		} else if entry.pickWorktree {
+			label = "Worktree… (t)"
 		} else if !entry.showCommit {
 			c := m.comparisons[entry.comparison]
 			label = c.Label
@@ -986,7 +1040,7 @@ func (m Model) viewSelector() string {
 
 func (m Model) viewLog() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("godiff — show commit"))
+	b.WriteString(m.title("show commit"))
 	b.WriteString("\n")
 	if m.logMode == logSearch {
 		b.WriteString(m.logInput.View())
@@ -1055,7 +1109,7 @@ func (m Model) logRangeMarker(index int) string {
 
 func (m Model) viewTree() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("godiff — " + m.active.Label))
+	b.WriteString(m.title(m.active.Label))
 	b.WriteString("\n")
 
 	if len(m.root.Children) == 0 {

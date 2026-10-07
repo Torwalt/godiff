@@ -21,7 +21,7 @@ func TestMergeDefaults(t *testing.T) {
 	for i, c := range cfg.Comparisons {
 		ids[i] = c.ID
 	}
-	want := []string{"worktree", "staged", "branch", "commit"}
+	want := []string{"worktree", "staged", "branch", "all", "commit"}
 	if !reflect.DeepEqual(ids, want) {
 		t.Errorf("ids = %v, want %v", ids, want)
 	}
@@ -29,6 +29,13 @@ func TestMergeDefaults(t *testing.T) {
 	branch, _ := cfg.Comparison("branch")
 	if !reflect.DeepEqual(branch.Args, []string{"master...HEAD"}) {
 		t.Errorf("branch args = %v", branch.Args)
+	}
+	all, _ := cfg.Comparison("all")
+	if !reflect.DeepEqual(all.Args, []string{"--merge-base", "master"}) || !all.Untracked {
+		t.Errorf("all = %+v, want merge base to working tree with untracked files", all)
+	}
+	if worktree, _ := cfg.Comparison("worktree"); !worktree.Untracked {
+		t.Error("working tree comparison omits untracked files")
 	}
 }
 
@@ -67,8 +74,8 @@ func TestMergeOverridesBuiltinAndAddsCustom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Comparisons) != 5 {
-		t.Fatalf("len = %d, want 4 builtins + 1 custom", len(cfg.Comparisons))
+	if len(cfg.Comparisons) != 6 {
+		t.Fatalf("len = %d, want 5 builtins + 1 custom", len(cfg.Comparisons))
 	}
 	branch, _ := cfg.Comparison("branch")
 	if branch.Label != "vs main" || !reflect.DeepEqual(branch.Args, []string{"main..HEAD"}) {
@@ -160,6 +167,33 @@ args = ["{base}...HEAD"]
 	}
 }
 
+func TestLoadFallsBackToMainWorktreeConfig(t *testing.T) {
+	main, linked := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, RepoConfigName), []byte(`exclude = ["gen"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(main, "no-such-config"))
+
+	cfg, err := Load(linked, Options{MainRoot: main})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Exclude, []string{":(exclude)gen"}) {
+		t.Errorf("exclude = %v, want the main worktree's", cfg.Exclude)
+	}
+
+	if err := os.WriteFile(filepath.Join(linked, RepoConfigName), []byte(`exclude = ["own"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(linked, Options{MainRoot: main})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Exclude, []string{":(exclude)own"}) {
+		t.Errorf("exclude = %v, want the linked worktree's own", cfg.Exclude)
+	}
+}
+
 func TestLoadMalformedConfig(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, RepoConfigName), []byte("base_branch = ["), 0o644); err != nil {
@@ -180,10 +214,11 @@ id = "x"
 kind = "show"
 args = ["HEAD~1"]
 exclude = ["a", ":(exclude)b"]
+untracked = true
 `), &f); err != nil {
 		t.Fatal(err)
 	}
-	if f.Comparisons[0].Kind != "show" || len(f.Comparisons[0].Exclude) != 2 {
+	if f.Comparisons[0].Kind != "show" || len(f.Comparisons[0].Exclude) != 2 || !f.Comparisons[0].Untracked {
 		t.Errorf("parsed = %+v", f.Comparisons[0])
 	}
 	if _, err := Merge([]File{f}, Options{}); err != nil {

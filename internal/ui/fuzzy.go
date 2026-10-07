@@ -49,6 +49,15 @@ func rankBranches(branches []string, query string) []string {
 	return rank(branches, func(b string) string { return b }, query)
 }
 
+// rankWorktrees matches against branch name and path; an empty query keeps
+// git's order, main worktree first.
+func rankWorktrees(items []worktreeItem, query string) []worktreeItem {
+	if query == "" {
+		return items
+	}
+	return rank(items, func(it worktreeItem) string { return it.name + " " + it.path }, query)
+}
+
 func rank[T any](items []T, text func(T) string, query string) []T {
 	type scored struct {
 		item  T

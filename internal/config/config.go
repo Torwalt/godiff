@@ -17,7 +17,7 @@ import (
 )
 
 // RepoConfigName is the repository configuration file, looked up at the
-// repository root.
+// root of the working tree, then of the main worktree.
 const RepoConfigName = ".godiff.toml"
 
 // File is the on-disk TOML schema, shared by global and repo config.
@@ -35,17 +35,21 @@ type File struct {
 
 // ComparisonFile is one [[comparisons]] entry.
 type ComparisonFile struct {
-	ID      string   `toml:"id"`
-	Label   string   `toml:"label"`
-	Kind    string   `toml:"kind"` // "diff" or "show"
-	Args    []string `toml:"args"`
-	Exclude []string `toml:"exclude"`
+	ID        string   `toml:"id"`
+	Label     string   `toml:"label"`
+	Kind      string   `toml:"kind"` // "diff" or "show"
+	Args      []string `toml:"args"`
+	Exclude   []string `toml:"exclude"`
+	Untracked bool     `toml:"untracked"`
 }
 
 // Options are command-line overrides.
 type Options struct {
 	BaseBranch   string // overrides base_branch when non-empty
 	NoRepoConfig bool   // skip the repository config file
+	// MainRoot is the main worktree's root. Linked worktrees lack an
+	// ignored or untracked repository config, so it is read from there.
+	MainRoot string
 }
 
 // Config is the merged, validated result.
@@ -84,6 +88,12 @@ func Load(repoRoot string, opts Options) (*Config, error) {
 		f, err := readFile(filepath.Join(repoRoot, RepoConfigName))
 		if err != nil {
 			return nil, err
+		}
+		if f == nil && opts.MainRoot != "" && opts.MainRoot != repoRoot {
+			f, err = readFile(filepath.Join(opts.MainRoot, RepoConfigName))
+			if err != nil {
+				return nil, err
+			}
 		}
 		if f != nil {
 			files = append(files, *f)
@@ -158,9 +168,12 @@ func Merge(files []File, opts Options) (*Config, error) {
 
 func builtins(base string) []gitx.Comparison {
 	return []gitx.Comparison{
-		{ID: "worktree", Label: "Working tree", Kind: gitx.KindDiff},
+		{ID: "worktree", Label: "Working tree", Kind: gitx.KindDiff, Untracked: true},
 		{ID: "staged", Label: "Staged changes", Kind: gitx.KindDiff, Args: []string{"--cached"}},
 		{ID: "branch", Label: "Branch against " + base, Kind: gitx.KindDiff, Args: []string{base + "...HEAD"}},
+		// Merge base to working tree: commits, staged, unstaged and untracked
+		// work in one tree.
+		{ID: "all", Label: "All changes since " + base, Kind: gitx.KindDiff, Args: []string{"--merge-base", base}, Untracked: true},
 		{ID: "commit", Label: "Current commit", Kind: gitx.KindShow, Args: []string{"HEAD"}},
 	}
 }
@@ -190,11 +203,12 @@ func toComparison(cf ComparisonFile, base string) (gitx.Comparison, error) {
 		label = cf.ID
 	}
 	return gitx.Comparison{
-		ID:      cf.ID,
-		Label:   strings.ReplaceAll(label, "{base}", base),
-		Kind:    kind,
-		Args:    args,
-		Exclude: normalizeExcludes(cf.Exclude),
+		ID:        cf.ID,
+		Label:     strings.ReplaceAll(label, "{base}", base),
+		Kind:      kind,
+		Args:      args,
+		Exclude:   normalizeExcludes(cf.Exclude),
+		Untracked: cf.Untracked,
 	}, nil
 }
 

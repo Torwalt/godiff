@@ -2,10 +2,14 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -124,7 +128,12 @@ func TestDisplayShowOmitsCommitMessage(t *testing.T) {
 	git(t, repo.Root, "add", "feature.txt")
 	git(t, repo.Root, "commit", "-m", "MESSAGE-MUST-NOT-APPEAR")
 
-	out, err := repo.DisplayCmd(Comparison{Kind: KindShow, Args: []string{"HEAD"}}, "").Output()
+	cmd, cleanup, err := repo.DisplayCmd(Comparison{Kind: KindShow, Args: []string{"HEAD"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,5 +307,143 @@ func TestBranchesSkipsCurrent(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] == "stacked" || got[1] == "stacked" {
 		t.Errorf("branches = %v, want feature/a and master", got)
+	}
+}
+
+func TestUntrackedComparisonLeavesIndexAlone(t *testing.T) {
+	repo := testRepo(t)
+	write(t, repo.Root, ".gitignore", "*.log\n")
+	git(t, repo.Root, "add", ".gitignore")
+	git(t, repo.Root, "commit", "-m", "ignore logs")
+	git(t, repo.Root, "switch", "-c", "feature")
+	write(t, repo.Root, "committed.txt", "committed\n")
+	git(t, repo.Root, "add", "committed.txt")
+	git(t, repo.Root, "commit", "-m", "feature work")
+	write(t, repo.Root, "README.md", "edited\n")
+	write(t, repo.Root, "new dir/untracked [x].txt", "untracked\n")
+	write(t, repo.Root, "vendor/dep.txt", "excluded\n")
+	write(t, repo.Root, "debug.log", "ignored\n")
+
+	cmp := Comparison{
+		Label:     "all",
+		Kind:      KindDiff,
+		Args:      []string{"--merge-base", "master"},
+		Exclude:   []string{":(exclude)vendor"},
+		Untracked: true,
+	}
+	files, err := repo.Discover(cmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]byte{}
+	for _, f := range files {
+		got[f.Path] = f.Status
+	}
+	want := map[string]byte{"committed.txt": 'A', "README.md": 'M', "new dir/untracked [x].txt": '?'}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("files = %q, want %q", got, want)
+	}
+
+	cmd, cleanup, err := repo.DisplayCmd(cmp, "new dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, []byte("+++ b/new dir/untracked [x].txt")) {
+		t.Errorf("display output is missing the untracked file:\n%s", out)
+	}
+	var index string
+	for _, e := range cmd.Env {
+		if v, ok := strings.CutPrefix(e, "GIT_INDEX_FILE="); ok {
+			index = v
+		}
+	}
+	cleanup()
+	if _, err := os.Stat(index); index == "" || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("temporary index %q survives cleanup: %v", index, err)
+	}
+
+	tracked, err := exec.Command("git", "-C", repo.Root, "ls-files").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(tracked, []byte("untracked")) {
+		t.Errorf("real index records the untracked file:\n%s", tracked)
+	}
+}
+
+func TestUntrackedComparisonWithoutUntrackedFiles(t *testing.T) {
+	repo := testRepo(t)
+	write(t, repo.Root, "README.md", "edited\n")
+	cmp := Comparison{Kind: KindDiff, Untracked: true}
+
+	files, err := repo.Discover(cmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Status != 'M' {
+		t.Errorf("files = %+v", files)
+	}
+	cmd, cleanup, err := repo.DisplayCmd(cmp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if cmd.Env != nil {
+		t.Errorf("env = %v, want inherited environment", cmd.Env)
+	}
+}
+
+func TestWorktreesAndProgress(t *testing.T) {
+	repo := testRepo(t)
+	dir := t.TempDir()
+	linked := filepath.Join(dir, "linked")
+	detached := filepath.Join(dir, "detached")
+	gone := filepath.Join(dir, "gone")
+	git(t, repo.Root, "worktree", "add", "-q", "-b", "agent/task", linked)
+	git(t, repo.Root, "worktree", "add", "-q", "--detach", detached)
+	git(t, repo.Root, "worktree", "add", "-q", "--detach", gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+
+	worktrees, err := repo.Worktrees()
+	if err != nil {
+		t.Fatal(err)
+	}
+	branches := map[string]string{}
+	for _, wt := range worktrees {
+		if wt.Head == "" {
+			t.Errorf("worktree without HEAD: %+v", wt)
+		}
+		branches[wt.Path] = wt.Branch
+	}
+	want := map[string]string{repo.Root: "master", linked: "agent/task", detached: ""}
+	if !reflect.DeepEqual(branches, want) {
+		t.Errorf("worktrees = %v, want %v", branches, want)
+	}
+	if worktrees[0].Path != repo.Root {
+		t.Errorf("first worktree = %q, want the main one", worktrees[0].Path)
+	}
+
+	write(t, linked, "a.txt", "a\n")
+	git(t, linked, "add", "a.txt")
+	git(t, linked, "commit", "-m", "first")
+	write(t, linked, "c.txt", "c\n")
+	git(t, linked, "add", "c.txt")
+	git(t, linked, "commit", "-m", "second")
+	git(t, linked, "mv", "a.txt", "b.txt")
+	write(t, linked, "README.md", "edited\n")
+	write(t, linked, "notes/u.txt", "untracked\n")
+
+	progress, err := (&Repo{Root: linked}).Progress("master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if progress != (Progress{Ahead: 2, Changed: 3}) {
+		t.Errorf("progress = %+v, want 2 ahead and 3 changed", progress)
 	}
 }

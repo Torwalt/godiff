@@ -3,6 +3,7 @@ package gitx
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -14,7 +15,8 @@ type ChangedFile struct {
 	Path string
 	// OldPath is the source path for renames and copies, otherwise empty.
 	OldPath string
-	// Status is the git status letter: A, M, D, R, C, T, U, X, B.
+	// Status is the git status letter: A, M, D, R, C, T, U, X, B, or ?
+	// for an untracked file reported by an Untracked comparison.
 	Status byte
 }
 
@@ -22,6 +24,18 @@ type ChangedFile struct {
 // parses the result. Output is captured, never paged, and NUL-delimited so
 // unusual filenames survive.
 func (r *Repo) Discover(cmp Comparison) ([]ChangedFile, error) {
+	var env []string
+	var untracked map[string]bool
+	if cmp.Untracked {
+		var cleanup func()
+		var err error
+		env, untracked, cleanup, err = r.untrackedIndex(cmp.Exclude)
+		if err != nil {
+			return nil, fmt.Errorf("untracked files (%s): %w", cmp.Label, err)
+		}
+		defer cleanup()
+	}
+
 	args := []string{"--no-pager", "-c", "core.quotePath=false", cmp.subcommand()}
 	args = append(args, "--name-status", "-z", "--no-color", "-M", "-C")
 	if cmp.Kind == KindShow {
@@ -35,6 +49,9 @@ func (r *Repo) Discover(cmp Comparison) ([]ChangedFile, error) {
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Root
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
@@ -45,7 +62,16 @@ func (r *Repo) Discover(cmp Comparison) ([]ChangedFile, error) {
 		}
 		return nil, fmt.Errorf("git %s (%s): %s", cmp.subcommand(), cmp.Label, msg)
 	}
-	return ParseNameStatus(out.Bytes())
+	files, err := ParseNameStatus(out.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	for i, f := range files {
+		if f.Status == 'A' && untracked[f.Path] {
+			files[i].Status = '?'
+		}
+	}
+	return files, nil
 }
 
 // ParseNameStatus parses `git diff --name-status -z` output. Records are

@@ -47,7 +47,10 @@ strings.
 - Exclusions are git pathspecs (`:(exclude)…`), normalized in config,
   applied to both discovery and display so hidden paths never reappear.
 - All git commands run with the repository root as working directory so
-  repo-relative paths work as pathspecs.
+  repo-relative paths work as pathspecs. Switching worktrees swaps that
+  root; nothing else changes.
+- Untracked files reach git diffs through a throwaway index copy
+  (`GIT_INDEX_FILE`) with intent-to-add entries. Never write the real index.
 - Keep the dependency set small (bubbletea, bubbles, lipgloss, BurntSushi
   toml). No go-git, no libgit2, no PTY libraries.
 - Non-goals (do not add): staging, committing, branch management, hunk

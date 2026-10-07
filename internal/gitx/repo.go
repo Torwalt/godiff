@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -41,6 +42,30 @@ func Detect(dir string) (*Repo, error) {
 		return nil, ErrNotARepo
 	}
 	return &Repo{Root: root}, nil
+}
+
+// run executes git in the repository root with extra environment entries
+// and optional stdin, returning captured stdout.
+func (r *Repo) run(env []string, stdin []byte, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = r.Root
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := firstLine(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("git %s: %s", args[0], msg)
+	}
+	return out.Bytes(), nil
 }
 
 func firstLine(s string) string {

@@ -26,12 +26,32 @@ godiff -print-config        # show effective comparisons and exclusions
 ```
 
 Built-in choices: working tree, staged changes, branch against the configured
-base (`master` by default), **Branch against…**, the current commit, and
-**Show commit**. Branch against… (`b`) lists local branches, most recently
-committed first; type to fuzzy-filter, and `enter` diffs `<branch>...HEAD`,
-which reviews a stacked branch against the branch it was cut from. Show commit
-lists the history reachable from `HEAD`, marks the configured base branch with
-`◆`, and opening one reviews only that commit.
+base (`master` by default), **Branch against…**, **All changes since** the
+base, the current commit, **Show commit**, and **Worktree…**. Branch against…
+(`b`) lists local branches, most recently committed first; type to
+fuzzy-filter, and `enter` diffs `<branch>...HEAD`, which reviews a stacked
+branch against the branch it was cut from. All changes since (`a`) diffs the
+merge base with the working tree, so committed, staged, unstaged and untracked
+work shows up as one tree. Show commit lists the history reachable from
+`HEAD`, marks the configured base branch with `◆`, and opening one reviews
+only that commit.
+
+The working tree and All changes since comparisons include untracked files,
+marked `?`. godiff diffs them through a throwaway copy of the index that
+records them as intent-to-add; the real index is never touched.
+
+### Worktrees
+
+Worktree… (`t`) lists every checkout git has registered for the repository,
+wherever it lives on disk (agent worktrees under `.claude/worktrees/`, temp
+directories, siblings). Each row shows the branch (or detached SHA), commits
+ahead of the base, uncommitted paths, and the path; `●` marks the active one.
+Type to fuzzy-filter by branch or path; `enter` switches godiff into that
+checkout and opens All changes since the base, and back returns to the
+picker. Every other comparison then runs in the chosen checkout too.
+
+Linked worktrees usually lack an ignored `.godiff.toml`, so godiff falls back
+to the main worktree's.
 
 ### Keys
 
@@ -44,6 +64,8 @@ lists the history reachable from `HEAD`, marks the configured base branch with
 | `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
 | `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc`/`q` cancels |
 | `space` | anchor or clear a commit range in Show commit |
+| `w` `s` `m` `a` `c` | in the selector: open working tree, staged, branch, all changes since, current commit |
+| `b` `h` `t` | in the selector: Branch against…, Show commit, Worktree… |
 | `r` | refresh changed paths (keeps selection and expansion) |
 | `esc`/`q`/`b` | back one screen |
 | `?` | toggle full key help |
