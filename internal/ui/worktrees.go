@@ -132,17 +132,12 @@ func (m Model) updateWorktrees(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // openWorktree points every later git invocation at the chosen checkout and
-// opens its changes since the base branch; back returns to the picker.
+// returns to the selector, so a large worktree is not diffed wholesale.
 func (m Model) openWorktree(item worktreeItem) (tea.Model, tea.Cmd) {
 	m.repo = &gitx.Repo{Root: item.Path}
 	m.worktree = item.name
 	m.root, m.rows = nil, nil
-	for i, entry := range m.selectorEntries() {
-		if !entry.builtin() && m.comparisons[entry.comparison].ID == "all" {
-			m.selCursor = i
-			return m.startComparison(m.comparisons[entry.comparison], screenWorktrees)
-		}
-	}
+	m.selCursor = 0
 	m.screen = screenSelector
 	m.status = statusStyle.Render("switched to " + item.name)
 	return m, nil

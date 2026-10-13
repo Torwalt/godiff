@@ -159,7 +159,7 @@ func TestSelectorIncludesPickers(t *testing.T) {
 	}
 }
 
-func TestWorktreePickerOpensAllChangesInChosenCheckout(t *testing.T) {
+func TestWorktreePickerSwitchesSelectorToChosenCheckout(t *testing.T) {
 	model, _ := testModel().updateSelector(runeKey('t'))
 	model, _ = model.(Model).onWorktrees(worktreesMsg{items: []worktreeItem{
 		{Worktree: gitx.Worktree{Path: "/tmp/repo", Branch: "master"}, name: "master", path: "/tmp/repo", progress: "clean"},
@@ -187,11 +187,20 @@ func TestWorktreePickerOpensAllChangesInChosenCheckout(t *testing.T) {
 
 	model, cmd := m.updateWorktrees(tea.KeyMsg{Type: tea.KeyEnter})
 	m = model.(Model)
-	if m.screen != screenLoading || m.treeBack != screenWorktrees || cmd == nil {
-		t.Fatalf("open: screen=%v back=%v cmd=%v", m.screen, m.treeBack, cmd)
+	if m.screen != screenSelector || m.selCursor != 0 || cmd != nil {
+		t.Fatalf("open: screen=%v cursor=%d cmd=%v", m.screen, m.selCursor, cmd)
 	}
-	if m.repo.Root != "/tmp/repo/.claude/worktrees/sco-946" || m.active.ID != "all" {
-		t.Errorf("repo=%q active=%+v", m.repo.Root, *m.active)
+	if m.repo.Root != "/tmp/repo/.claude/worktrees/sco-946" {
+		t.Errorf("repo=%q", m.repo.Root)
+	}
+	if view := m.viewSelector(); !strings.Contains(view, "select comparison @ sco-946-wt") {
+		t.Errorf("selector does not name the worktree:\n%s", view)
+	}
+
+	model, cmd = m.updateSelector(runeKey('a'))
+	m = model.(Model)
+	if m.screen != screenLoading || m.treeBack != screenSelector || m.active.ID != "all" || cmd == nil {
+		t.Fatalf("all: screen=%v back=%v active=%+v cmd=%v", m.screen, m.treeBack, *m.active, cmd)
 	}
 	if view := m.View(); !strings.Contains(view, "All changes since master @ sco-946-wt") {
 		t.Errorf("loading view does not name the worktree:\n%s", view)
@@ -200,11 +209,8 @@ func TestWorktreePickerOpensAllChangesInChosenCheckout(t *testing.T) {
 	m.screen = screenTree
 	model, _ = m.updateTree(runeKey('b'))
 	m = model.(Model)
-	if m.screen != screenWorktrees || m.worktreeInput.Value() != "946" {
-		t.Errorf("back: screen=%v query=%q", m.screen, m.worktreeInput.Value())
-	}
-	if view := m.viewSelector(); !strings.Contains(view, "select comparison @ sco-946-wt") {
-		t.Errorf("selector does not name the worktree:\n%s", view)
+	if m.screen != screenSelector || m.repo.Root != "/tmp/repo/.claude/worktrees/sco-946" {
+		t.Errorf("back: screen=%v repo=%q", m.screen, m.repo.Root)
 	}
 }
 

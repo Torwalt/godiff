@@ -47,8 +47,9 @@ wherever it lives on disk (agent worktrees under `.claude/worktrees/`, temp
 directories, siblings). Each row shows the branch (or detached SHA), commits
 ahead of the base, uncommitted paths, and the path; `●` marks the active one.
 Type to fuzzy-filter by branch or path; `enter` switches godiff into that
-checkout and opens All changes since the base, and back returns to the
-picker. Every other comparison then runs in the chosen checkout too.
+checkout and returns to the selector, so you pick how to review it: working
+tree, staged, branch against the base, All changes since, or single commits.
+Every comparison then runs in the chosen checkout.
 
 Linked worktrees usually lack an ignored `.godiff.toml`, so godiff falls back
 to the main worktree's.
