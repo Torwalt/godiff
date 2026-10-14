@@ -101,6 +101,47 @@ func (r *Repo) ResolveCommit(revision string) (Commit, error) {
 	return commits[0], nil
 }
 
+// CommitMessages returns colored `git log` output in medium format, bodies
+// included, for the commits cmp covers. It is empty when cmp has no commit
+// side (working tree against the index, index against HEAD).
+func (r *Repo) CommitMessages(cmp Comparison) (string, error) {
+	revs := cmp.logRevisions()
+	if len(revs) == 0 {
+		return "", nil
+	}
+	args := append([]string{"log", "--color=always", "--decorate", "--format=medium"}, revs...)
+	out, err := r.run(nil, nil, args...)
+	return string(out), err
+}
+
+// logRevisions maps the revisions of a diff onto the range `git log` walks:
+// `A...B` and `A B` diff from (the merge base with) A to B, a single A
+// diffs against the working tree, so its commits are A..HEAD.
+func (c Comparison) logRevisions() []string {
+	var revs []string
+	for _, a := range c.Args {
+		if !strings.HasPrefix(a, "-") {
+			revs = append(revs, a)
+		}
+	}
+	if c.Kind == KindShow {
+		return append([]string{"--no-walk"}, revs...)
+	}
+	switch len(revs) {
+	case 1:
+		if from, to, ok := strings.Cut(revs[0], "..."); ok {
+			return []string{from + ".." + to}
+		}
+		if strings.Contains(revs[0], "..") {
+			return revs
+		}
+		return []string{revs[0] + "..HEAD"}
+	case 2:
+		return []string{revs[0] + ".." + revs[1]}
+	}
+	return nil
+}
+
 func isHexObjectID(s string) bool {
 	if len(s) < 4 || len(s) > 64 {
 		return false

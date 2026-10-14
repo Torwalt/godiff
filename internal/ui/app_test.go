@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,6 +93,17 @@ func TestQActsLikeEscape(t *testing.T) {
 		}
 	})
 
+	t.Run("commits", func(t *testing.T) {
+		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}, runeKey('b')} {
+			m := testModel()
+			m.screen = screenMessages
+			model, cmd := m.updateMessages(msg)
+			if updated := model.(Model); updated.screen != screenTree || cmd != nil {
+				t.Errorf("key %q: screen=%v cmd=%v", msg.String(), updated.screen, cmd)
+			}
+		}
+	})
+
 	t.Run("search", func(t *testing.T) {
 		for _, msg := range []tea.KeyMsg{runeKey('q'), {Type: tea.KeyEsc}} {
 			m := testModel()
@@ -124,6 +136,81 @@ func TestCollapseAllResetsTree(t *testing.T) {
 	updated := model.(Model)
 	if len(updated.rows) != fresh || updated.cursor != 0 || updated.offset != 0 || cmd != nil {
 		t.Errorf("rows=%d want %d, cursor=%d offset=%d cmd=%v", len(updated.rows), fresh, updated.cursor, updated.offset, cmd)
+	}
+}
+
+func TestCommitsScreenScrollsMessages(t *testing.T) {
+	m := testModel()
+	m.screen = screenTree
+	m.height = 10
+	m.active = &m.comparisons[2]
+	m.root = tree.Build([]tree.FileEntry{{Path: "file.go", Status: 'M'}})
+	m.rows = m.root.VisibleRows()
+
+	model, cmd := m.updateTree(runeKey('c'))
+	m = model.(Model)
+	if m.screen != screenMessages || !m.messagesLoading || cmd == nil {
+		t.Fatalf("open: screen=%v loading=%v cmd=%v", m.screen, m.messagesLoading, cmd)
+	}
+
+	lines := make([]string, 20)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("message line %02d", i)
+	}
+	model, _ = m.onMessages(messagesMsg{text: strings.Join(lines, "\n") + "\n"})
+	m = model.(Model)
+	view := m.View()
+	for _, want := range []string{"Branch against master · commits", "message line 00", "message line 05"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "message line 06") {
+		t.Errorf("view exceeds the window:\n%s", view)
+	}
+
+	model, _ = m.updateMessages(runeKey('j'))
+	m = model.(Model)
+	if view := m.View(); strings.Contains(view, "message line 00") || !strings.Contains(view, "message line 06") {
+		t.Errorf("j did not scroll:\n%s", view)
+	}
+	model, _ = m.updateMessages(runeKey('G'))
+	m = model.(Model)
+	if view := m.View(); !strings.Contains(view, "message line 19") {
+		t.Errorf("G did not reach the bottom:\n%s", view)
+	}
+
+	model, _ = m.updateMessages(runeKey('q'))
+	m = model.(Model)
+	if m.screen != screenTree {
+		t.Fatalf("back: screen=%v", m.screen)
+	}
+}
+
+func TestCommitsScreenWithoutCommits(t *testing.T) {
+	m := testModel()
+	m.screen = screenTree
+	m.active = &m.comparisons[0]
+	m.root = tree.Build([]tree.FileEntry{{Path: "file.go", Status: 'M'}})
+	m.rows = m.root.VisibleRows()
+
+	model, _ := m.updateTree(runeKey('c'))
+	model, _ = model.(Model).onMessages(messagesMsg{})
+	if m := model.(Model); m.screen != screenTree || !strings.Contains(m.status, "no commits in Working tree") {
+		t.Errorf("empty: screen=%v status=%q", m.screen, m.status)
+	}
+
+	model, _ = m.updateTree(runeKey('c'))
+	model, _ = model.(Model).onMessages(messagesMsg{err: errors.New("bad revision")})
+	if m := model.(Model); m.screen != screenTree || !strings.Contains(m.status, "bad revision") {
+		t.Errorf("error: screen=%v status=%q", m.screen, m.status)
+	}
+
+	model, _ = m.updateTree(runeKey('c'))
+	model, _ = model.(Model).updateMessages(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = model.(Model).onMessages(messagesMsg{text: "late"})
+	if m := model.(Model); m.screen != screenTree || m.messagesText != "" {
+		t.Errorf("late result reopened commits: screen=%v text=%q", m.screen, m.messagesText)
 	}
 }
 

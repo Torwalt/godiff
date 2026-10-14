@@ -20,8 +20,9 @@ delta → return → inspect next cluster.
 - **delta** (the user's configured git pager) owns diff rendering, paging,
   search, and hyperlinks.
 - **godiff** owns configuration, comparison selection, changed-path
-  discovery, tree construction/navigation, and launching git as an external
-  process.
+  discovery, tree construction/navigation, the commit-message view
+  (captured `git log` text, never patches), and launching git as an
+  external process.
 
 Never parse full git patches. Never render diffs inside Bubble Tea. Never
 invoke a shell — comparisons are structured argument lists, not command

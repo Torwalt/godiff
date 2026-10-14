@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -29,6 +30,7 @@ const (
 	screenSearch
 	screenBranches
 	screenWorktrees
+	screenMessages
 )
 
 const (
@@ -147,6 +149,11 @@ type Model struct {
 	searchMatches []*tree.Node
 	searchCursor  int
 
+	// commit message state; messagesText is kept unwrapped for resizes
+	messages        viewport.Model
+	messagesText    string
+	messagesLoading bool
+
 	width, height int
 	spin          spinner.Model
 	help          help.Model
@@ -227,10 +234,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = msg.Width
 		m.clampScroll()
 		m.clampLogScroll()
+		m.layoutMessages()
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading && !m.branchLoading && !m.worktreeLoading {
+		if m.screen != screenLoading && m.screen != screenLogLoading && !m.logLoading && !m.branchLoading && !m.worktreeLoading && !m.messagesLoading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -252,6 +260,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case worktreeRemovedMsg:
 		return m.onWorktreeRemoved(msg)
 
+	case messagesMsg:
+		return m.onMessages(msg)
+
 	case diffDoneMsg:
 		if msg.err != nil {
 			m.status = errorStyle.Render(fmt.Sprintf("pager/git exited with error: %v", msg.err))
@@ -272,6 +283,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBranches(msg)
 		case screenWorktrees:
 			return m.updateWorktrees(msg)
+		case screenMessages:
+			return m.updateMessages(msg)
 		case screenLoading, screenLogLoading:
 			if msg.String() == "ctrl+c" {
 				return m, tea.Quit
@@ -794,6 +807,8 @@ func (m Model) updateTree(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openDiff(m.rows[m.cursor].Node)
 	case key.Matches(msg, keys.Search):
 		return m.startSearch()
+	case key.Matches(msg, keys.Commits):
+		return m.startMessages()
 	case key.Matches(msg, keys.Refresh):
 		m.screen = screenLoading
 		return m, tea.Batch(m.spin.Tick, m.discover(*m.active, true))
@@ -941,6 +956,8 @@ func (m Model) View() string {
 		return m.viewBranches()
 	case screenWorktrees:
 		return m.viewWorktrees()
+	case screenMessages:
+		return m.viewMessages()
 	}
 	return ""
 }

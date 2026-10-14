@@ -296,6 +296,50 @@ func TestDiscoverInclusiveCommitRange(t *testing.T) {
 	}
 }
 
+func TestCommitMessages(t *testing.T) {
+	repo := testRepo(t)
+	git(t, repo.Root, "checkout", "-b", "feature")
+	write(t, repo.Root, "first.txt", "first\n")
+	git(t, repo.Root, "add", "first.txt")
+	git(t, repo.Root, "commit", "-m", "first change", "-m", "FIRST-BODY")
+	write(t, repo.Root, "second.txt", "second\n")
+	git(t, repo.Root, "add", "second.txt")
+	git(t, repo.Root, "commit", "-m", "second change", "-m", "SECOND-BODY")
+
+	both := []string{"first change", "FIRST-BODY", "second change", "SECOND-BODY"}
+	tests := []struct {
+		name    string
+		cmp     Comparison
+		want    []string
+		notWant []string
+	}{
+		{"three-dot branch", Comparison{Kind: KindDiff, Args: []string{"master...HEAD"}}, both, []string{"initial"}},
+		{"inclusive range", Comparison{Kind: KindDiff, Args: []string{"HEAD~1^", "HEAD"}}, both, []string{"initial"}},
+		{"since merge base", Comparison{Kind: KindDiff, Args: []string{"--merge-base", "master"}}, both, []string{"initial"}},
+		{"show", Comparison{Kind: KindShow, Args: []string{"HEAD"}}, []string{"second change", "SECOND-BODY"}, []string{"FIRST-BODY"}},
+		{"working tree", Comparison{Kind: KindDiff}, nil, both},
+		{"staged", Comparison{Kind: KindDiff, Args: []string{"--cached"}}, nil, both},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := repo.CommitMessages(tt.cmp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range tt.want {
+				if !strings.Contains(out, s) {
+					t.Errorf("missing %q:\n%s", s, out)
+				}
+			}
+			for _, s := range tt.notWant {
+				if strings.Contains(out, s) {
+					t.Errorf("unexpected %q:\n%s", s, out)
+				}
+			}
+		})
+	}
+}
+
 func TestBranchesSkipsCurrent(t *testing.T) {
 	repo := testRepo(t)
 	git(t, repo.Root, "branch", "feature/a")

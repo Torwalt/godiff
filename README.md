@@ -69,6 +69,7 @@ to the main worktree's.
 | `enter` | open: directory toggles its subclusters, file opens its diff, root opens the full diff |
 | `o` | open diff for the selected node (root = full comparison, directory = subtree, file = single file) |
 | `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc`/`q` cancels |
+| `c` | show the full commit messages of the comparison; `esc`/`q`/`b` returns to the tree |
 | `space` | anchor or clear a commit range in Show commit |
 | `w` `s` `m` `a` `c` | in the selector: open working tree, staged, branch, all changes since, current commit |
 | `b` `h` `t` | in the selector: Branch against…, Show commit, Worktree… |
@@ -76,6 +77,12 @@ to the main worktree's.
 | `esc`/`q`/`b` | back one screen |
 | `?` | toggle full key help |
 | `ctrl+c` | quit |
+
+`c` in a file tree prints the comparison's commits as `git log` does, subject
+and body: the single commit, every commit of a range, or the commits a branch
+comparison adds (`<base>..HEAD` for `<base>...HEAD`). Working tree and staged
+changes have none. `↑/k` `↓/j` scroll, `space`/`pgdn` and `pgup` page, `g`/`G`
+jump to the top and bottom.
 
 In Show commit, `↑/k` and `↓/j` scroll through commits, `/` searches commit
 subjects, and `ctrl-v` starts a search with the clipboard contents. While
