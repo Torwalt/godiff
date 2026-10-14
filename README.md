@@ -51,6 +51,11 @@ checkout and returns to the selector, so you pick how to review it: working
 tree, staged, branch against the base, All changes since, or single commits.
 Every comparison then runs in the chosen checkout.
 
+`ctrl+d` asks to delete the highlighted worktree; only `y` confirms. Deletion
+runs `git worktree remove --force`: uncommitted changes are discarded, the
+branch stays. The main worktree, the active one, and locked ones cannot be
+deleted.
+
 Linked worktrees usually lack an ignored `.godiff.toml`, so godiff falls back
 to the main worktree's.
 

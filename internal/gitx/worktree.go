@@ -45,6 +45,13 @@ func (r *Repo) Worktrees() ([]Worktree, error) {
 	return worktrees, nil
 }
 
+// RemoveWorktree deletes a linked worktree, uncommitted changes included.
+// Its branch stays. Locked worktrees fail.
+func (r *Repo) RemoveWorktree(path string) error {
+	_, err := r.run(nil, nil, "worktree", "remove", "--force", path)
+	return err
+}
+
 // Progress summarizes a checkout's work relative to a base revision.
 type Progress struct {
 	Ahead   int // commits on HEAD that base lacks

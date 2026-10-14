@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -25,6 +26,11 @@ type worktreeItem struct {
 type worktreesMsg struct {
 	items []worktreeItem
 	err   error
+}
+
+type worktreeRemovedMsg struct {
+	item worktreeItem
+	err  error
 }
 
 func newWorktreeItem(wt gitx.Worktree, mainRoot, base string) worktreeItem {
@@ -60,6 +66,7 @@ func (m Model) startWorktrees() (tea.Model, tea.Cmd) {
 	m.worktrees = nil
 	m.worktreeMatches = nil
 	m.worktreeCursor = 0
+	m.worktreeConfirm = nil
 	m.worktreeLoading = true
 	m.worktreeInput = textinput.New()
 	m.worktreeInput.Prompt = "/ "
@@ -100,6 +107,22 @@ func (m Model) onWorktrees(msg worktreesMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateWorktrees(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.worktreeConfirm != nil {
+		item := *m.worktreeConfirm
+		m.worktreeConfirm = nil
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "y", "Y":
+			m.worktreeRemoving = true
+			m.status = statusStyle.Render("deleting " + item.name + "…")
+			repo := m.repo
+			return m, func() tea.Msg {
+				return worktreeRemovedMsg{item: item, err: repo.RemoveWorktree(item.Path)}
+			}
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		m.worktreeLoading = false
@@ -123,12 +146,40 @@ func (m Model) updateWorktrees(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.openWorktree(m.worktreeMatches[m.worktreeCursor])
+	case "ctrl+d":
+		if m.worktreeRemoving || m.worktreeCursor >= len(m.worktreeMatches) {
+			return m, nil
+		}
+		item := m.worktreeMatches[m.worktreeCursor]
+		switch item.Path {
+		case m.worktrees[0].Path:
+			m.status = errorStyle.Render("cannot delete the main worktree")
+		case m.repo.Root:
+			m.status = errorStyle.Render("cannot delete the active worktree; switch to another one first")
+		default:
+			m.worktreeConfirm = &item
+			m.status = ""
+		}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.worktreeInput, cmd = m.worktreeInput.Update(msg)
 	m.worktreeMatches = rankWorktrees(m.worktrees, m.worktreeInput.Value())
 	m.worktreeCursor = min(m.worktreeCursor, max(len(m.worktreeMatches)-1, 0))
 	return m, cmd
+}
+
+func (m Model) onWorktreeRemoved(msg worktreeRemovedMsg) (tea.Model, tea.Cmd) {
+	m.worktreeRemoving = false
+	if msg.err != nil {
+		m.status = errorStyle.Render(msg.err.Error())
+		return m, nil
+	}
+	m.worktrees = slices.DeleteFunc(m.worktrees, func(it worktreeItem) bool { return it.Path == msg.item.Path })
+	m.worktreeMatches = rankWorktrees(m.worktrees, m.worktreeInput.Value())
+	m.worktreeCursor = min(m.worktreeCursor, max(len(m.worktreeMatches)-1, 0))
+	m.status = statusStyle.Render("deleted " + msg.item.name)
+	return m, nil
 }
 
 // openWorktree points every later git invocation at the chosen checkout and
@@ -181,7 +232,15 @@ func (m Model) viewWorktrees() string {
 	if m.status != "" {
 		b.WriteString(m.status + "\n")
 	}
-	b.WriteString(statusStyle.Render("enter open · ↑/↓ move · esc/q back · ● active"))
+	if it := m.worktreeConfirm; it != nil {
+		prompt := "delete worktree " + it.name
+		if it.progress != "" {
+			prompt += " (" + it.progress + ")"
+		}
+		b.WriteString(errorStyle.Render(prompt + "? y/n"))
+	} else {
+		b.WriteString(statusStyle.Render("enter open · ctrl+d delete · ↑/↓ move · esc/q back · ● active"))
+	}
 	return b.String()
 }
 

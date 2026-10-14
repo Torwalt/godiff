@@ -123,6 +123,10 @@ type Model struct {
 	worktreeInput   textinput.Model
 	worktreeMatches []worktreeItem
 	worktreeCursor  int
+	// worktreeConfirm is the worktree ctrl+d marked for deletion; only y
+	// deletes it.
+	worktreeConfirm  *worktreeItem
+	worktreeRemoving bool
 	// worktree names the checkout picked in the worktree picker; empty
 	// while godiff still runs in the one it started in.
 	worktree string
@@ -244,6 +248,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case worktreesMsg:
 		return m.onWorktrees(msg)
+
+	case worktreeRemovedMsg:
+		return m.onWorktreeRemoved(msg)
 
 	case diffDoneMsg:
 		if msg.err != nil {

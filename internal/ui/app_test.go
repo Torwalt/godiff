@@ -223,6 +223,65 @@ func TestWorktreePickerError(t *testing.T) {
 	}
 }
 
+func TestWorktreePickerDeletesOnlyAfterY(t *testing.T) {
+	model, _ := testModel().updateSelector(runeKey('t'))
+	model, _ = model.(Model).onWorktrees(worktreesMsg{items: []worktreeItem{
+		{Worktree: gitx.Worktree{Path: "/tmp/repo", Branch: "master"}, name: "master", path: "/tmp/repo", progress: "clean"},
+		{Worktree: gitx.Worktree{Path: "/tmp/repo/.claude/worktrees/sco-946", Branch: "sco-946-wt"}, name: "sco-946-wt", path: ".claude/worktrees/sco-946", progress: "5 ahead · 7 changed"},
+		{Worktree: gitx.Worktree{Path: "/tmp/scratch/base", Head: "790b75a938b5"}, name: "detached 790b75a", path: "/tmp/scratch/base", progress: "2 changed"},
+	}})
+	m := model.(Model)
+	ctrlD := tea.KeyMsg{Type: tea.KeyCtrlD}
+
+	model, _ = m.updateWorktrees(ctrlD)
+	m = model.(Model)
+	if m.worktreeConfirm != nil || !strings.Contains(m.status, "cannot delete the main worktree") {
+		t.Fatalf("main: confirm=%v status=%q", m.worktreeConfirm, m.status)
+	}
+
+	model, _ = m.updateWorktrees(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.(Model).updateWorktrees(ctrlD)
+	m = model.(Model)
+	if view := m.viewWorktrees(); !strings.Contains(view, "delete worktree sco-946-wt (5 ahead · 7 changed)? y/n") {
+		t.Fatalf("no prompt:\n%s", view)
+	}
+	model, cmd := m.updateWorktrees(runeKey('n'))
+	m = model.(Model)
+	if m.worktreeConfirm != nil || m.worktreeRemoving || cmd != nil || m.worktreeInput.Value() != "" {
+		t.Fatalf("cancel: confirm=%v removing=%v cmd=%v query=%q", m.worktreeConfirm, m.worktreeRemoving, cmd, m.worktreeInput.Value())
+	}
+
+	model, _ = m.updateWorktrees(ctrlD)
+	model, cmd = model.(Model).updateWorktrees(runeKey('y'))
+	m = model.(Model)
+	if m.worktreeConfirm != nil || !m.worktreeRemoving || cmd == nil {
+		t.Fatalf("confirm: confirm=%v removing=%v cmd=%v", m.worktreeConfirm, m.worktreeRemoving, cmd)
+	}
+
+	failed, _ := m.onWorktreeRemoved(worktreeRemovedMsg{item: m.worktreeMatches[1], err: errors.New("is locked")})
+	if f := failed.(Model); f.worktreeRemoving || len(f.worktreeMatches) != 3 || !strings.Contains(f.status, "is locked") {
+		t.Errorf("error: removing=%v matches=%d status=%q", f.worktreeRemoving, len(f.worktreeMatches), f.status)
+	}
+
+	model, _ = m.onWorktreeRemoved(worktreeRemovedMsg{item: m.worktreeMatches[1]})
+	m = model.(Model)
+	if m.worktreeRemoving || len(m.worktreeMatches) != 2 || m.worktreeCursor != 1 || m.worktreeMatches[1].name != "detached 790b75a" {
+		t.Fatalf("removed: removing=%v cursor=%d matches=%+v", m.worktreeRemoving, m.worktreeCursor, m.worktreeMatches)
+	}
+	if !strings.Contains(m.status, "deleted sco-946-wt") {
+		t.Errorf("status=%q", m.status)
+	}
+
+	model, _ = m.updateWorktrees(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = model.(Model).updateSelector(runeKey('t'))
+	model, _ = model.(Model).onWorktrees(worktreesMsg{items: m.worktrees})
+	model, _ = model.(Model).updateWorktrees(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = model.(Model).updateWorktrees(ctrlD)
+	if m = model.(Model); m.worktreeConfirm != nil || !strings.Contains(m.status, "cannot delete the active worktree") {
+		t.Errorf("active: confirm=%v status=%q", m.worktreeConfirm, m.status)
+	}
+}
+
 func TestBranchPickerFiltersAndOpensThreeDotDiff(t *testing.T) {
 	model, _ := testModel().updateSelector(runeKey('b'))
 	model, _ = model.(Model).onBranches(branchesMsg{branches: []string{"sco-961/salary-2-0", "master", "sco-935/recurring-read"}})

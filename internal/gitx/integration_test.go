@@ -447,3 +447,33 @@ func TestWorktreesAndProgress(t *testing.T) {
 		t.Errorf("progress = %+v, want 2 ahead and 3 changed", progress)
 	}
 }
+
+func TestRemoveWorktreeDiscardsChangesKeepsBranch(t *testing.T) {
+	repo := testRepo(t)
+	dir := t.TempDir()
+	linked := filepath.Join(dir, "linked")
+	locked := filepath.Join(dir, "locked")
+	git(t, repo.Root, "worktree", "add", "-q", "-b", "agent/task", linked)
+	git(t, repo.Root, "worktree", "add", "-q", "--lock", "--detach", locked)
+	write(t, linked, "README.md", "edited\n")
+	write(t, linked, "notes/u.txt", "untracked\n")
+
+	if err := repo.RemoveWorktree(linked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(linked); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stat removed worktree: %v", err)
+	}
+	git(t, repo.Root, "rev-parse", "--verify", "-q", "agent/task")
+
+	if err := repo.RemoveWorktree(locked); err == nil {
+		t.Error("removed a locked worktree")
+	}
+	worktrees, err := repo.Worktrees()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(worktrees) != 2 || worktrees[1].Path != locked {
+		t.Errorf("worktrees = %+v, want main and locked", worktrees)
+	}
+}
