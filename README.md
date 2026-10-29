@@ -33,8 +33,9 @@ fuzzy-filter, and `enter` diffs `<branch>...HEAD`, which reviews a stacked
 branch against the branch it was cut from. All changes since (`a`) diffs the
 merge base with the working tree, so committed, staged, unstaged and untracked
 work shows up as one tree. Show commit lists the history reachable from
-`HEAD`, marks the configured base branch with `◆`, and opening one reviews
-only that commit.
+`HEAD`, marks the configured base branch with `◆` and the tips of local
+branches between it and `HEAD` with `◇`, and opening one reviews only that
+commit. On a stacked branch, its own commits are the ones above the first `◇`.
 
 The working tree and All changes since comparisons include untracked files,
 marked `?`. godiff diffs them through a throwaway copy of the index that

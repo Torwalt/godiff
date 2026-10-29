@@ -65,12 +65,13 @@ type selectorEntry struct {
 func (e selectorEntry) builtin() bool { return e.showCommit || e.pickBranch || e.pickWorktree }
 
 type commitsMsg struct {
-	request uint64
-	append  bool
-	commits []gitx.Commit
-	hasNext bool
-	baseSHA string
-	err     error
+	request    uint64
+	append     bool
+	commits    []gitx.Commit
+	hasNext    bool
+	baseSHA    string
+	branchTips map[string][]string
+	err        error
 }
 
 type discoveredMsg struct {
@@ -111,6 +112,7 @@ type Model struct {
 	logRequest uint64
 	logAnchor  int
 	baseSHA    string
+	branchTips map[string][]string
 
 	// branch picker state
 	branches      []string
@@ -210,18 +212,21 @@ func (m Model) loadLogPage(query string, offset int, appendPage bool, request ui
 	return func() tea.Msg {
 		commits, hasNext, err := repo.LogPage(query, offset, commitBatchSize)
 		baseSHA := ""
+		var branchTips map[string][]string
 		if offset == 0 && baseBranch != "" {
 			if base, resolveErr := repo.ResolveCommit(baseBranch); resolveErr == nil {
 				baseSHA = base.SHA
+				branchTips, _ = repo.BranchTips(baseBranch)
 			}
 		}
 		return commitsMsg{
-			request: request,
-			append:  appendPage,
-			commits: commits,
-			hasNext: hasNext,
-			baseSHA: baseSHA,
-			err:     err,
+			request:    request,
+			append:     appendPage,
+			commits:    commits,
+			hasNext:    hasNext,
+			baseSHA:    baseSHA,
+			branchTips: branchTips,
+			err:        err,
 		}
 	}
 }
@@ -340,6 +345,7 @@ func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
 		m.logOffset = 0
 		m.logAnchor = -1
 		m.baseSHA = msg.baseSHA
+		m.branchTips = msg.branchTips
 	}
 	m.logHasNext = msg.hasNext
 	m.status = ""
@@ -512,6 +518,7 @@ func (m Model) startLog() (tea.Model, tea.Cmd) {
 	m.logInput = newLogInput()
 	m.logAnchor = -1
 	m.baseSHA = ""
+	m.branchTips = nil
 	m.logRequest++
 	m.treeBack = screenSelector
 	m.screen = screenLogLoading
@@ -1088,6 +1095,8 @@ func (m Model) viewLog() string {
 		marker := ""
 		if commit.SHA == m.baseSHA {
 			marker = "  " + baseStyle.Render("◆ "+m.baseBranch)
+		} else if names := m.branchTips[commit.SHA]; len(names) > 0 {
+			marker = "  " + branchStyle.Render("◇ "+strings.Join(names, ", "))
 		}
 		line := "  " + label + marker
 		if i == m.logCursor {

@@ -10,6 +10,7 @@ var (
 	ghostStyle    = lipgloss.NewStyle().Faint(true)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 	baseStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	branchStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 
 	statusColors = map[byte]lipgloss.Style{
 		'A': lipgloss.NewStyle().Foreground(lipgloss.Color("2")),
