@@ -44,8 +44,12 @@ func rankDirs(dirs []*tree.Node, query string) []*tree.Node {
 	return rank(dirs, func(d *tree.Node) string { return d.Path }, query)
 }
 
-// rankBranches is rankDirs for branch names.
+// rankBranches is rankDirs for branch names; an empty query keeps the
+// given order.
 func rankBranches(branches []string, query string) []string {
+	if query == "" {
+		return branches
+	}
 	return rank(branches, func(b string) string { return b }, query)
 }
 

@@ -188,10 +188,11 @@ func (m Model) openWorktree(item worktreeItem) (tea.Model, tea.Cmd) {
 	m.repo = &gitx.Repo{Root: item.Path}
 	m.worktree = item.name
 	m.root, m.rows = nil, nil
+	m.review, m.rev = nil, ""
 	m.selCursor = 0
 	m.screen = screenSelector
 	m.status = statusStyle.Render("switched to " + item.name)
-	return m, nil
+	return m, m.detectReview()
 }
 
 func (m Model) viewWorktrees() string {

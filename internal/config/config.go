@@ -22,8 +22,8 @@ const RepoConfigName = ".godiff.toml"
 
 // File is the on-disk TOML schema, shared by global and repo config.
 type File struct {
-	// BaseBranch is the base for the built-in branch comparison and the
-	// {base} placeholder.
+	// BaseBranch is the {base} placeholder, and {parent} when no branch
+	// lies between it and {tip}.
 	BaseBranch string `toml:"base_branch"`
 	// Exclude lists exclusion pathspecs applied to every comparison.
 	// Plain patterns are wrapped as `:(exclude)<pattern>`; patterns that
@@ -140,7 +140,7 @@ func Merge(files []File, opts Options) (*Config, error) {
 		base = opts.BaseBranch
 	}
 
-	comparisons := builtins(base)
+	comparisons := builtins()
 	for _, f := range files {
 		for _, cf := range f.Comparisons {
 			cmp, err := toComparison(cf, base)
@@ -166,15 +166,15 @@ func Merge(files []File, opts Options) (*Config, error) {
 	}, nil
 }
 
-func builtins(base string) []gitx.Comparison {
+func builtins() []gitx.Comparison {
 	return []gitx.Comparison{
 		{ID: "worktree", Label: "Working tree", Kind: gitx.KindDiff, Untracked: true},
 		{ID: "staged", Label: "Staged changes", Kind: gitx.KindDiff, Args: []string{"--cached"}},
-		{ID: "branch", Label: "Branch against " + base, Kind: gitx.KindDiff, Args: []string{base + "...HEAD"}},
+		{ID: "branch", Label: "Branch changes since " + gitx.ParentPlaceholder, Kind: gitx.KindDiff, Args: []string{gitx.ParentPlaceholder + "..." + gitx.TipPlaceholder}},
 		// Merge base to working tree: commits, staged, unstaged and untracked
 		// work in one tree.
-		{ID: "all", Label: "All changes since " + base, Kind: gitx.KindDiff, Args: []string{"--merge-base", base}, Untracked: true},
-		{ID: "commit", Label: "Current commit", Kind: gitx.KindShow, Args: []string{"HEAD"}},
+		{ID: "all", Label: "All changes since " + gitx.ParentPlaceholder, Kind: gitx.KindDiff, Args: []string{"--merge-base", gitx.ParentPlaceholder}, Untracked: true},
+		{ID: "commit", Label: "Current commit", Kind: gitx.KindShow, Args: []string{gitx.TipPlaceholder}},
 	}
 }
 

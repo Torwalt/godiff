@@ -25,17 +25,47 @@ godiff -base develop        # override the base branch for this run
 godiff -print-config        # show effective comparisons and exclusions
 ```
 
-Built-in choices: working tree, staged changes, branch against the configured
-base (`master` by default), **Branch against…**, **All changes since** the
-base, the current commit, **Show commit**, and **Worktree…**. Branch against…
-(`b`) lists local branches, most recently committed first; type to
-fuzzy-filter, and `enter` diffs `<branch>...HEAD`, which reviews a stacked
-branch against the branch it was cut from. All changes since (`a`) diffs the
-merge base with the working tree, so committed, staged, unstaged and untracked
-work shows up as one tree. Show commit lists the history reachable from
-`HEAD`, marks the configured base branch with `◆` and the tips of local
-branches between it and `HEAD` with `◇`, and opening one reviews only that
-commit. On a stacked branch, its own commits are the ones above the first `◇`.
+Built-in choices: working tree, staged changes, **Branch changes**,
+**Branch against…**, **All changes since**, the current commit, **Show
+commit**, and **Worktree…**.
+
+Branch changes (`m`) shows what the branch itself adds: it diffs
+`<parent>...<tip>`, where the parent is the nearest local or remote-tracking
+branch below the tip that the configured base (`master` by default) has not
+merged, or the base itself when there is none. A branch stacked on another
+one, or one built on an `origin/master` newer than the local `master`, shows
+only its own commits. Branches pointing at the tip and their namesakes on any
+remote count as the tip's own and are never the parent, so unpushed commits
+stay visible. The label names the parent and its commit count, e.g. `Branch
+changes since origin/sco-1014/raises (3 commits)`.
+
+The tip is `HEAD`, unless `HEAD`'s branch has a newer copy on a remote: one
+ahead of `HEAD`, or diverged from it with the later commit date (a
+force-pushed rebase). godiff then reviews that copy without touching the
+checkout, so a colleague's branch checked out in a worktree needs no pull; a
+`git fetch` anywhere in the repository (e.g. pulling `master`) is enough.
+Unpushed local work, or a local rebase, keeps `HEAD` as the tip. The selector
+names the reviewed version and the drift, e.g. `reviewing
+origin/feature/x · o: use local · local vs origin/feature/x: 18 ahead, 23
+behind`; `o` switches between the two. Branch changes, Branch against…,
+Current commit and Show commit follow the tip; working tree, staged and All
+changes since stay on the checkout and read `(local)`.
+
+Branch against… (`b`) overrides the guess: it lists the base, then local and
+remote-tracking branches, most recently committed first; type to
+fuzzy-filter, and `enter` diffs `<branch>...<tip>`. All changes since (`a`)
+diffs the parent's merge base with the working tree, so committed, staged,
+unstaged and untracked work shows up as one tree.
+
+Show commit (`h`) lists the commits Branch changes covers, newest first,
+closed by the commit the branch starts from (`◆ master`, or `◇ <parent>` on a
+stacked branch). The cursor starts on the oldest branch commit: `enter`
+reviews it, `esc` returns to the same row, `k` moves to the next one. On the
+base itself, or with no commits of its own, it lists the full history of the
+tip instead. Searching always covers the full history. There, `◆` marks
+where the tip leaves the configured base and `◇` the tips of local and
+remote-tracking branches between it and the tip; opening a commit reviews
+only that commit.
 
 The working tree and All changes since comparisons include untracked files,
 marked `?`. godiff diffs them through a throwaway copy of the index that
@@ -49,7 +79,7 @@ directories, siblings). Each row shows the branch (or detached SHA), commits
 ahead of the base, uncommitted paths, and the path; `●` marks the active one.
 Type to fuzzy-filter by branch or path; `enter` switches godiff into that
 checkout and returns to the selector, so you pick how to review it: working
-tree, staged, branch against the base, All changes since, or single commits.
+tree, staged, Branch changes, All changes since, or single commits.
 Every comparison then runs in the chosen checkout.
 
 `ctrl+d` asks to delete the highlighted worktree; only `y` confirms. Deletion
@@ -72,8 +102,9 @@ to the main worktree's.
 | `/` | fuzzy-search directory clusters; `enter` jumps to and opens the match, `esc`/`q` cancels |
 | `c` | show the full commit messages of the comparison; `esc`/`q`/`b` returns to the tree |
 | `space` | anchor or clear a commit range in Show commit |
-| `w` `s` `m` `a` `c` | in the selector: open working tree, staged, branch, all changes since, current commit |
+| `w` `s` `m` `a` `c` | in the selector: open working tree, staged, branch changes, all changes since, current commit |
 | `b` `h` `t` | in the selector: Branch against…, Show commit, Worktree… |
+| `o` | in the selector: review the local branch or its remote copy |
 | `r` | refresh changed paths (keeps selection and expansion) |
 | `esc`/`q`/`b` | back one screen |
 | `?` | toggle full key help |
@@ -81,7 +112,7 @@ to the main worktree's.
 
 `c` in a file tree prints the comparison's commits as `git log` does, subject
 and body: the single commit, every commit of a range, or the commits a branch
-comparison adds (`<base>..HEAD` for `<base>...HEAD`). Working tree and staged
+comparison adds (`<parent>..<tip>` for `<parent>...<tip>`). Working tree and staged
 changes have none. `↑/k` `↓/j` scroll, `space`/`pgdn` and `pgup` page, `g`/`G`
 jump to the top and bottom.
 
@@ -89,7 +120,7 @@ In Show commit, `↑/k` and `↓/j` scroll through commits, `/` searches commit
 subjects, and `ctrl-v` starts a search with the clipboard contents. While
 searching, ordinary keys edit the query, arrows choose a result, `esc`/`q` returns
 to navigation, and `enter` opens the selected commit. A full or abbreviated SHA
-can select a commit outside the current `HEAD` history. Returning from a
+can select a commit outside the tip's history. Returning from a
 commit's file tree restores the same selection. Press `space` to anchor a range,
 move to its other endpoint, and press `enter` to review the selected commits as
 one inclusive diff; press `space` again to clear the range.

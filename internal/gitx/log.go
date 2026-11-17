@@ -16,12 +16,11 @@ type Commit struct {
 	Subject  string
 }
 
-// LogPage returns a page of commits reachable from HEAD, newest first. A
+// LogPage returns a page of the commits revs walk, newest first. A
 // non-empty query searches subjects case-insensitively; an unambiguous
-// hexadecimal object ID resolves directly, even when it is not reachable from
-// HEAD. The extra record requested from git is used only to report whether a
+// hexadecimal object ID resolves directly, even when revs do not reach it. The extra record requested from git is used only to report whether a
 // following page exists.
-func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) {
+func (r *Repo) LogPage(revs []string, query string, offset, limit int) ([]Commit, bool, error) {
 	if offset < 0 || limit < 1 {
 		return nil, false, fmt.Errorf("invalid log page: offset %d, limit %d", offset, limit)
 	}
@@ -44,7 +43,7 @@ func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) 
 	if query != "" {
 		args = append(args, "--regexp-ignore-case", "--fixed-strings", "--grep="+query)
 	}
-	args = append(args, "HEAD")
+	args = append(args, revs...)
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.Root
 	var out, stderr bytes.Buffer
@@ -55,7 +54,7 @@ func (r *Repo) LogPage(query string, offset, limit int) ([]Commit, bool, error) 
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, false, fmt.Errorf("git log (HEAD): %s", msg)
+		return nil, false, fmt.Errorf("git log %s: %s", strings.Join(revs, " "), msg)
 	}
 
 	commits, err := ParseLog(out.Bytes())

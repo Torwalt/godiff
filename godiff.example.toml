@@ -3,7 +3,10 @@
 # Global config:     ~/.config/godiff/config.toml
 # Repository config: <repo root>/.godiff.toml  (overrides global by id)
 
-# Base branch for the built-in "branch" comparison and the {base} placeholder.
+# Base branch for the {base} placeholder. {tip} expands to the reviewed
+# revision (HEAD, or a newer remote copy of its branch), {parent} to the
+# nearest branch below it that the base has not merged, or the base itself.
+# The built-in "branch", "all" and "commit" comparisons use them.
 base_branch = "master"
 
 # Exclusion pathspecs applied to every comparison, for discovery and display.

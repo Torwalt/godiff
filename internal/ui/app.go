@@ -5,6 +5,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -71,7 +72,10 @@ type commitsMsg struct {
 	hasNext    bool
 	baseSHA    string
 	branchTips map[string][]string
-	err        error
+	// cut: commits stop at the review's parent, which closes the list.
+	cut    bool
+	review *gitx.Review
+	err    error
 }
 
 type discoveredMsg struct {
@@ -79,6 +83,13 @@ type discoveredMsg struct {
 	files   []gitx.ChangedFile
 	err     error
 	refresh bool
+	review  *gitx.Review
+}
+
+type reviewMsg struct {
+	root   string
+	review gitx.Review
+	err    error
 }
 
 type branchesMsg struct {
@@ -100,6 +111,11 @@ type Model struct {
 
 	// selector state
 	selCursor int
+	// review is what the comparisons review; nil until detected.
+	review *gitx.Review
+	// rev overrides which revision to review; empty picks the newer of HEAD
+	// and its branch's remote copy.
+	rev string
 
 	// commit log state
 	logCommits []gitx.Commit
@@ -113,6 +129,7 @@ type Model struct {
 	logAnchor  int
 	baseSHA    string
 	branchTips map[string][]string
+	logCut     bool
 
 	// branch picker state
 	branches      []string
@@ -193,41 +210,81 @@ func (m Model) Init() tea.Cmd {
 	if m.screen == screenLoading {
 		return tea.Batch(m.spin.Tick, m.discover(*m.active, false))
 	}
-	return nil
+	return m.detectReview()
 }
 
 // discover returns a command running changed-path discovery off the UI
 // goroutine; the result comes back as a message to Update.
 func (m Model) discover(cmp gitx.Comparison, refresh bool) tea.Cmd {
-	repo := m.repo
+	repo, base, rev := m.repo, m.baseBranch, m.rev
 	return func() tea.Msg {
+		var review *gitx.Review
+		if cmp.UsesReview() {
+			r, err := repo.Review(base, rev)
+			if err != nil {
+				return discoveredMsg{cmp: cmp, err: err, refresh: refresh}
+			}
+			cmp, review = cmp.WithReview(r), &r
+		}
 		files, err := repo.Discover(cmp)
-		return discoveredMsg{cmp: cmp, files: files, err: err, refresh: refresh}
+		return discoveredMsg{cmp: cmp, files: files, err: err, refresh: refresh, review: review}
 	}
 }
 
-func (m Model) loadLogPage(query string, offset int, appendPage bool, request uint64) tea.Cmd {
-	repo := m.repo
-	baseBranch := m.baseBranch
+func (m Model) detectReview() tea.Cmd {
+	repo, base, rev := m.repo, m.baseBranch, m.rev
 	return func() tea.Msg {
-		commits, hasNext, err := repo.LogPage(query, offset, commitBatchSize)
-		baseSHA := ""
-		var branchTips map[string][]string
-		if offset == 0 && baseBranch != "" {
-			if base, resolveErr := repo.ResolveCommit(baseBranch); resolveErr == nil {
-				baseSHA = base.SHA
-				branchTips, _ = repo.BranchTips(baseBranch)
+		review, err := repo.Review(base, rev)
+		return reviewMsg{root: repo.Root, review: review, err: err}
+	}
+}
+
+// label names a comparison as reviewed once detected.
+func (m Model) label(cmp gitx.Comparison) string {
+	if m.review != nil {
+		return cmp.WithReview(*m.review).Label
+	}
+	return strings.ReplaceAll(cmp.Label, gitx.ParentPlaceholder, "…")
+}
+
+// selectorComparison is the comparison of a selector entry, marked local
+// while a remote copy is reviewed.
+func (m Model) selectorComparison(entry selectorEntry) gitx.Comparison {
+	cmp := m.comparisons[entry.comparison]
+	if m.review != nil && !cmp.UsesReview() {
+		return cmp.WithReview(*m.review)
+	}
+	return cmp
+}
+
+func (m Model) loadLogPage(query string, offset int, appendPage bool, request uint64) tea.Cmd {
+	repo, base, rev := m.repo, m.baseBranch, m.rev
+	tip := "HEAD"
+	if m.review != nil {
+		tip = m.review.Rev
+	}
+	return func() tea.Msg {
+		msg := commitsMsg{request: request, append: appendPage}
+		revs, limit := []string{tip}, commitBatchSize
+		var review gitx.Review
+		if offset == 0 {
+			var err error
+			if review, err = repo.Review(base, rev); err == nil {
+				msg.review = &review
+				msg.baseSHA = review.BaseFork
+				msg.branchTips, _ = repo.BranchTips(base, review.Rev)
+				revs = []string{review.Rev}
+				if query == "" && review.Parent.Commits > 0 {
+					revs = append(revs, "^"+review.Parent.Ref)
+					limit, msg.cut = review.Parent.Commits, true
+				}
 			}
 		}
-		return commitsMsg{
-			request:    request,
-			append:     appendPage,
-			commits:    commits,
-			hasNext:    hasNext,
-			baseSHA:    baseSHA,
-			branchTips: branchTips,
-			err:        err,
+		msg.commits, msg.hasNext, msg.err = repo.LogPage(revs, query, offset, limit)
+		if msg.cut {
+			msg.commits = append(msg.commits, review.Parent.Fork)
 		}
+		return msg
 	}
 }
 
@@ -252,6 +309,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case discoveredMsg:
 		return m.onDiscovered(msg)
+
+	case reviewMsg:
+		if msg.root == m.repo.Root && msg.err == nil {
+			m.review = &msg.review
+		}
+		return m, nil
 
 	case commitsMsg:
 		return m.onCommits(msg)
@@ -346,6 +409,14 @@ func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
 		m.logAnchor = -1
 		m.baseSHA = msg.baseSHA
 		m.branchTips = msg.branchTips
+		m.logCut = msg.cut
+		if msg.review != nil {
+			m.review = msg.review
+		}
+		if msg.cut {
+			// The oldest commit of the branch: review starts at the bottom.
+			m.logCursor = max(len(msg.commits)-2, 0)
+		}
 	}
 	m.logHasNext = msg.hasNext
 	m.status = ""
@@ -355,6 +426,9 @@ func (m Model) onCommits(msg commitsMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) onDiscovered(msg discoveredMsg) (tea.Model, tea.Cmd) {
+	if msg.review != nil {
+		m.review = msg.review
+	}
 	if msg.err != nil {
 		m.status = errorStyle.Render(msg.err.Error())
 		if m.treeBack != screenSelector && !msg.refresh {
@@ -449,6 +523,15 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.startWorktrees()
 			}
 		}
+	case "o":
+		if m.review == nil || m.review.Copy == nil {
+			return m, nil
+		}
+		m.rev = m.review.Copy.Ref
+		if m.review.Rev != "HEAD" {
+			m.rev = "HEAD"
+		}
+		return m, m.detectReview()
 	default:
 		for i, entry := range entries {
 			if entry.builtin() {
@@ -459,7 +542,7 @@ func (m Model) updateSelector(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				continue
 			}
 			m.selCursor = i
-			return m.startComparison(c, screenSelector)
+			return m.startComparison(m.selectorComparison(entry), screenSelector)
 		}
 	}
 	return m, nil
@@ -497,7 +580,7 @@ func (m Model) openSelectorEntry(entry selectorEntry) (tea.Model, tea.Cmd) {
 	case entry.pickWorktree:
 		return m.startWorktrees()
 	}
-	return m.startComparison(m.comparisons[entry.comparison], screenSelector)
+	return m.startComparison(m.selectorComparison(entry), screenSelector)
 }
 
 func (m Model) startComparison(cmp gitx.Comparison, back screen) (tea.Model, tea.Cmd) {
@@ -519,6 +602,7 @@ func (m Model) startLog() (tea.Model, tea.Cmd) {
 	m.logAnchor = -1
 	m.baseSHA = ""
 	m.branchTips = nil
+	m.logCut = false
 	m.logRequest++
 	m.treeBack = screenSelector
 	m.screen = screenLogLoading
@@ -723,7 +807,7 @@ func (m Model) onBranches(msg branchesMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	m.branches = msg.branches
+	m.branches = append([]string{m.baseBranch}, slices.DeleteFunc(msg.branches, func(b string) bool { return b == m.baseBranch })...)
 	m.branchMatches = rankBranches(m.branches, m.branchInput.Value())
 	return m, nil
 }
@@ -765,7 +849,7 @@ func (m Model) branchComparison(branch string) gitx.Comparison {
 		ID:      "branch:" + branch,
 		Label:   "Branch against " + branch,
 		Kind:    gitx.KindDiff,
-		Args:    []string{branch + "...HEAD"},
+		Args:    []string{branch + "..." + gitx.TipPlaceholder},
 		Exclude: append([]string(nil), m.exclude...),
 	}
 }
@@ -949,7 +1033,7 @@ func (m Model) View() string {
 	case screenLoading:
 		label := ""
 		if m.active != nil {
-			label = m.active.Label
+			label = m.label(*m.active)
 		}
 		if m.worktree != "" {
 			label += " @ " + m.worktree
@@ -1041,7 +1125,24 @@ func (m Model) viewBranches() string {
 func (m Model) viewSelector() string {
 	var b strings.Builder
 	b.WriteString(m.title("select comparison"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	if r := m.review; r != nil && r.Copy != nil {
+		c := r.Copy
+		var drift []string
+		if c.Ahead > 0 {
+			drift = append(drift, fmt.Sprintf("%d ahead", c.Ahead))
+		}
+		if c.Behind > 0 {
+			drift = append(drift, fmt.Sprintf("%d behind", c.Behind))
+		}
+		line := "reviewing " + c.Name + " · o: use local"
+		if r.Rev == "HEAD" {
+			line = "reviewing local " + c.Branch + " · o: use " + c.Name
+		}
+		b.WriteString(statusStyle.Render(line + " · local vs " + c.Name + ": " + strings.Join(drift, ", ")))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 	for i, entry := range m.selectorEntries() {
 		label := "Show commit (h)"
 		if entry.pickBranch {
@@ -1050,7 +1151,7 @@ func (m Model) viewSelector() string {
 			label = "Worktree… (t)"
 		} else if !entry.showCommit {
 			c := m.comparisons[entry.comparison]
-			label = c.Label
+			label = m.label(c)
 			if k, ok := selectorShortcuts[c.ID]; ok {
 				label += " (" + k + ")"
 			}
@@ -1071,7 +1172,11 @@ func (m Model) viewSelector() string {
 
 func (m Model) viewLog() string {
 	var b strings.Builder
-	b.WriteString(m.title("show commit"))
+	title := "show commit"
+	if m.logCut && m.review != nil {
+		title += " · " + m.review.Name + " since " + m.review.Parent.String()
+	}
+	b.WriteString(m.title(title))
 	b.WriteString("\n")
 	if m.logMode == logSearch {
 		b.WriteString(m.logInput.View())

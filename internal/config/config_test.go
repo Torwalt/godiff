@@ -27,11 +27,11 @@ func TestMergeDefaults(t *testing.T) {
 	}
 
 	branch, _ := cfg.Comparison("branch")
-	if !reflect.DeepEqual(branch.Args, []string{"master...HEAD"}) {
+	if !reflect.DeepEqual(branch.Args, []string{"{parent}...{tip}"}) {
 		t.Errorf("branch args = %v", branch.Args)
 	}
 	all, _ := cfg.Comparison("all")
-	if !reflect.DeepEqual(all.Args, []string{"--merge-base", "master"}) || !all.Untracked {
+	if !reflect.DeepEqual(all.Args, []string{"--merge-base", "{parent}"}) || !all.Untracked {
 		t.Errorf("all = %+v, want merge base to working tree with untracked files", all)
 	}
 	if worktree, _ := cfg.Comparison("worktree"); !worktree.Untracked {
@@ -50,11 +50,6 @@ func TestMergeBaseBranchPrecedence(t *testing.T) {
 	if cfg.BaseBranch != "develop" {
 		t.Errorf("base = %q, want repo override", cfg.BaseBranch)
 	}
-	branch, _ := cfg.Comparison("branch")
-	if branch.Label != "Branch against develop" {
-		t.Errorf("label = %q", branch.Label)
-	}
-
 	cfg, err = Merge([]File{global, repo}, Options{BaseBranch: "release"})
 	if err != nil {
 		t.Fatal(err)

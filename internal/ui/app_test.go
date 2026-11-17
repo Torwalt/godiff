@@ -274,8 +274,8 @@ func TestWorktreePickerSwitchesSelectorToChosenCheckout(t *testing.T) {
 
 	model, cmd := m.updateWorktrees(tea.KeyMsg{Type: tea.KeyEnter})
 	m = model.(Model)
-	if m.screen != screenSelector || m.selCursor != 0 || cmd != nil {
-		t.Fatalf("open: screen=%v cursor=%d cmd=%v", m.screen, m.selCursor, cmd)
+	if m.screen != screenSelector || m.selCursor != 0 || cmd == nil {
+		t.Fatalf("open:screen=%v cursor=%d cmd=%v", m.screen, m.selCursor, cmd)
 	}
 	if m.repo.Root != "/tmp/repo/.claude/worktrees/sco-946" {
 		t.Errorf("repo=%q", m.repo.Root)
@@ -390,7 +390,7 @@ func TestBranchPickerFiltersAndOpensThreeDotDiff(t *testing.T) {
 	if m.screen != screenLoading || m.treeBack != screenBranches || cmd == nil {
 		t.Fatalf("open: screen=%v back=%v cmd=%v", m.screen, m.treeBack, cmd)
 	}
-	if !reflect.DeepEqual(m.active.Args, []string{"sco-961/salary-2-0...HEAD"}) || m.active.Kind != gitx.KindDiff {
+	if !reflect.DeepEqual(m.active.Args, []string{"sco-961/salary-2-0...{tip}"}) || m.active.Kind != gitx.KindDiff {
 		t.Errorf("active = %+v", *m.active)
 	}
 	if !reflect.DeepEqual(m.active.Exclude, []string{":(exclude)vendor"}) {

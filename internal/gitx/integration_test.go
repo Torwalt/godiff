@@ -191,7 +191,7 @@ func TestLogPagePaginatesHeadHistory(t *testing.T) {
 		git(t, repo.Root, "commit", "-m", fmt.Sprintf("change %02d", i))
 	}
 
-	first, hasNext, err := repo.LogPage("", 0, 10)
+	first, hasNext, err := repo.LogPage([]string{"HEAD"}, "", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestLogPagePaginatesHeadHistory(t *testing.T) {
 		t.Errorf("first page bounds = %q..%q", first[0].Subject, first[9].Subject)
 	}
 
-	second, hasNext, err := repo.LogPage("", 10, 10)
+	second, hasNext, err := repo.LogPage([]string{"HEAD"}, "", 10, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestLogPageSearchesSubjectsAndResolvesSHA(t *testing.T) {
 	git(t, repo.Root, "add", "README.md")
 	git(t, repo.Root, "commit", "-m", "Add Search Needle")
 
-	matches, hasNext, err := repo.LogPage("search needle", 0, 10)
+	matches, hasNext, err := repo.LogPage([]string{"HEAD"}, "search needle", 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,13 +237,13 @@ func TestLogPageSearchesSubjectsAndResolvesSHA(t *testing.T) {
 	write(t, repo.Root, "README.md", "hidden\n")
 	git(t, repo.Root, "add", "README.md")
 	git(t, repo.Root, "commit", "-m", "Hidden branch commit")
-	hidden, _, err := repo.LogPage("hidden branch", 0, 10)
+	hidden, _, err := repo.LogPage([]string{"HEAD"}, "hidden branch", 0, 10)
 	if err != nil || len(hidden) != 1 {
 		t.Fatalf("hidden commit = %+v, err=%v", hidden, err)
 	}
 	git(t, repo.Root, "checkout", "master")
 
-	bySHA, hasNext, err := repo.LogPage(hidden[0].ShortSHA, 0, 10)
+	bySHA, hasNext, err := repo.LogPage([]string{"HEAD"}, hidden[0].ShortSHA, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

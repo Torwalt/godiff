@@ -35,7 +35,7 @@ func TestParseLogMalformed(t *testing.T) {
 func TestLogPageRejectsInvalidBounds(t *testing.T) {
 	repo := &Repo{}
 	for _, bounds := range [][2]int{{-1, 10}, {0, 0}} {
-		if _, _, err := repo.LogPage("", bounds[0], bounds[1]); err == nil {
+		if _, _, err := repo.LogPage([]string{"HEAD"}, "", bounds[0], bounds[1]); err == nil {
 			t.Errorf("LogPage offset=%d limit=%d: expected error", bounds[0], bounds[1])
 		}
 	}
